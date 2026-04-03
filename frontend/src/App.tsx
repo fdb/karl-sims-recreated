@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { initWasm, create_renderer, set_scene, set_paused, reset_scene } from "./wasm";
+import Dashboard from "./pages/Dashboard";
 import "./App.css";
+
+type Tab = "viewer" | "dashboard";
 
 const SCENES = [
   { id: "starfish", label: "Starfish (4 flippers)" },
@@ -15,6 +18,7 @@ const SCENES = [
 ];
 
 export default function App() {
+  const [tab, setTab] = useState<Tab>("dashboard");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const initedRef = useRef(false);
   const [currentScene, setCurrentScene] = useState("starfish");
@@ -56,23 +60,46 @@ export default function App() {
   return (
     <div className="app">
       <h1>Evolving Virtual Creatures</h1>
-      <div className="controls">
-        <select value={currentScene} onChange={handleSceneChange} disabled={!ready}>
-          {SCENES.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <button onClick={handlePlayPause} disabled={!ready}>
-          {paused ? "Play" : "Pause"}
+      <div className="tabs">
+        <button
+          className={tab === "dashboard" ? "active" : ""}
+          onClick={() => setTab("dashboard")}
+        >
+          Dashboard
         </button>
-        <button onClick={handleReset} disabled={!ready}>
-          Reset
+        <button
+          className={tab === "viewer" ? "active" : ""}
+          onClick={() => setTab("viewer")}
+        >
+          3D Viewer
         </button>
       </div>
-      <canvas ref={canvasRef} id="sim-canvas" width={960} height={640} />
-      <p className="hint">Drag to orbit. Scroll to zoom.</p>
+
+      {tab === "dashboard" && <Dashboard />}
+
+      <div style={{ display: tab === "viewer" ? "block" : "none" }}>
+        <div className="controls">
+          <select
+            value={currentScene}
+            onChange={handleSceneChange}
+            disabled={!ready}
+          >
+            {SCENES.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <button onClick={handlePlayPause} disabled={!ready}>
+            {paused ? "Play" : "Pause"}
+          </button>
+          <button onClick={handleReset} disabled={!ready}>
+            Reset
+          </button>
+        </div>
+        <canvas ref={canvasRef} id="sim-canvas" width={960} height={640} />
+        <p className="hint">Drag to orbit. Scroll to zoom.</p>
+      </div>
     </div>
   );
 }

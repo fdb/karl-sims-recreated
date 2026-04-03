@@ -34,9 +34,15 @@ async fn main() {
     };
 
     // Build axum app: REST API + WebSocket + static file serving.
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any);
+
     let app = api::routes()
         .route("/api/live", ws::ws_route())
         .with_state(state)
+        .layer(cors)
         .fallback_service(tower_http::services::ServeDir::new("frontend/dist"));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")

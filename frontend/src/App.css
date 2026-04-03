@@ -65,3 +65,122 @@ h1 {
   font-size: 0.8rem;
   color: #667;
 }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.tabs button {
+  padding: 8px 20px;
+  border: 1px solid #444;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: #2a2a3e;
+  color: #999;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  background: #3a3a4e;
+  color: #e0e0e0;
+  border-bottom: 2px solid #4caf50;
+}
+
+.dashboard { width: 960px; }
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.dashboard h2 { font-size: 1.1rem; font-weight: 500; }
+
+.create-evo {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.create-evo input {
+  width: 60px;
+  padding: 4px 8px;
+  background: #2a2a3e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e0e0e0;
+}
+
+.create-evo button,
+.evo-item button,
+.creature-item button {
+  padding: 4px 12px;
+  background: #4caf50;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+}
+
+.evo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.evo-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: #2a2a3e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.evo-item.selected { border-color: #4caf50; }
+.evo-item:hover { background: #3a3a4e; }
+
+.status-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.status-badge.running { background: #2e7d32; }
+.status-badge.completed { background: #455a64; }
+.status-badge.stopped { background: #d32f2f; }
+
+.evo-detail { margin-top: 16px; }
+.evo-detail h3, .evo-detail h4 { margin-bottom: 8px; font-weight: 500; }
+
+.fitness-chart { background: #222; border-radius: 4px; margin-bottom: 16px; }
+
+.creature-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.creature-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 12px;
+  background: #2a2a3e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.creature-item:hover { background: #3a3a4e; }
+
+.empty { color: #666; font-style: italic; }
+
+.chart-placeholder { color: #666; font-style: italic; padding: 20px; text-align: center; }
