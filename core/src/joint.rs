@@ -1,6 +1,7 @@
 use glam::{DVec3, DQuat};
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JointType {
     Rigid,     // 0 DOF
     Revolute,  // 1 DOF

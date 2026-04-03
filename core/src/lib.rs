@@ -7,3 +7,4 @@ pub mod featherstone;
 pub mod water;
 pub mod collision;
 pub mod integrator;
+pub mod genotype;
