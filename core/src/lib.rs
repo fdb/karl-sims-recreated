@@ -6,3 +6,4 @@ pub mod spatial;
 pub mod featherstone;
 pub mod water;
 pub mod collision;
+pub mod integrator;
