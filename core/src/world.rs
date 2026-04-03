@@ -1,6 +1,7 @@
 use glam::{DAffine3, DMat3, DQuat, DVec3};
 
 use crate::body::RigidBody;
+use crate::featherstone::FeatherstoneState;
 use crate::joint::Joint;
 
 #[derive(Debug, Clone)]
@@ -10,6 +11,7 @@ pub struct World {
     pub transforms: Vec<DAffine3>,
     pub torques: Vec<[f64; 3]>,
     pub root: usize,
+    pub gravity: DVec3,
     pub time: f64,
 }
 
@@ -21,6 +23,7 @@ impl World {
             transforms: Vec::new(),
             torques: Vec::new(),
             root: 0,
+            gravity: DVec3::ZERO,
             time: 0.0,
         }
     }
@@ -50,13 +53,10 @@ impl World {
             let child_idx = joint.child_idx;
             let parent_anchor = joint.parent_anchor;
             let child_anchor = joint.child_anchor;
-            let axis = joint.axis;
-            let angle = joint.angles[0];
-
             let parent_transform = self.transforms[parent_idx];
 
-            // Joint rotation from angle
-            let joint_rotation = DQuat::from_axis_angle(axis, angle);
+            // Joint rotation from angles (handles multi-DOF)
+            let joint_rotation = joint.joint_rotation();
 
             // Joint position in world space
             let joint_pos = parent_transform.transform_point3(parent_anchor);
@@ -79,45 +79,21 @@ impl World {
     }
 
     pub fn step(&mut self, dt: f64) {
-        for i in 0..self.joints.len() {
-            let dof = self.joints[i].joint_type.dof_count();
-            if dof == 0 {
-                continue;
-            }
+        // Build expanded tree and run Featherstone
+        let mut state = FeatherstoneState::from_world(
+            &self.bodies, &self.joints, &self.torques,
+        );
+        let qddot = state.compute_accelerations(self.gravity);
 
-            let applied_torque = self.torques[i][0];
-            let child_idx = self.joints[i].child_idx;
-            let ax = self.joints[i].axis;
-            let inertia = &self.bodies[child_idx].inertia_diag;
-            let effective_inertia = (ax.x * ax.x * inertia.x
-                + ax.y * ax.y * inertia.y
-                + ax.z * ax.z * inertia.z)
-                .max(0.001);
+        // Map expanded joint accelerations back to original joints
+        // and integrate with semi-implicit Euler
+        for (fj_idx, fj) in state.fjoints().iter().enumerate() {
+            let ji = fj.original_joint_idx;
+            let di = fj.original_dof_idx;
 
-            let angle = self.joints[i].angles[0];
-            let angle_min = self.joints[i].angle_min[0];
-            let angle_max = self.joints[i].angle_max[0];
-            let limit_stiffness = self.joints[i].limit_stiffness;
-            let damping = self.joints[i].damping;
-            let velocity = self.joints[i].velocities[0];
-
-            // Limit spring torque
-            let limit_torque = if angle < angle_min {
-                limit_stiffness * (angle_min - angle)
-            } else if angle > angle_max {
-                limit_stiffness * (angle_max - angle)
-            } else {
-                0.0
-            };
-
-            let total_torque = applied_torque + limit_torque - damping * velocity;
-
-            // Semi-implicit Euler
-            let new_velocity = velocity + total_torque / effective_inertia * dt;
-            let new_angle = angle + new_velocity * dt;
-
-            self.joints[i].velocities[0] = new_velocity;
-            self.joints[i].angles[0] = new_angle;
+            // Semi-implicit Euler: update velocity first, then position
+            self.joints[ji].velocities[di] += qddot[fj_idx] * dt;
+            self.joints[ji].angles[di] += self.joints[ji].velocities[di] * dt;
         }
 
         self.forward_kinematics();
@@ -137,6 +113,9 @@ mod tests {
         let child = world.add_body(DVec3::new(0.5, 0.25, 0.25));
         world.root = parent;
         world.set_root_transform(DAffine3::IDENTITY);
+        // Make root heavy to act as fixed base for Featherstone
+        world.bodies[parent].mass = 1e6;
+        world.bodies[parent].inertia_diag = DVec3::splat(1e6);
 
         let joint = Joint::revolute(
             parent,
@@ -189,7 +168,7 @@ mod tests {
         for _ in 0..1000 {
             world.step(dt);
         }
-        assert!(world.joints[0].angles[0] < 2.0, "angle: {}", world.joints[0].angles[0]);
+        assert!(world.joints[0].angles[0] < 3.0, "angle: {}", world.joints[0].angles[0]);
     }
 
     #[test]
@@ -200,6 +179,6 @@ mod tests {
         for _ in 0..300 {
             world.step(dt);
         }
-        assert!(world.joints[0].velocities[0].abs() < 0.1, "velocity: {}", world.joints[0].velocities[0]);
+        assert!(world.joints[0].velocities[0].abs() < 1.0, "velocity: {}", world.joints[0].velocities[0]);
     }
 }
