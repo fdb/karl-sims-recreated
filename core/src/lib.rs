@@ -12,3 +12,5 @@ pub mod mutation;
 pub mod phenotype;
 pub mod brain;
 pub mod creature;
+pub mod mating;
+pub mod fitness;

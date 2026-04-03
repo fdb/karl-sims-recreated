@@ -212,7 +212,7 @@ fn is_connected(genome: &GenomeGraph) -> bool {
 // 5. Garbage collection
 // ---------------------------------------------------------------------------
 
-fn garbage_collect(genome: &mut GenomeGraph) {
+pub fn garbage_collect(genome: &mut GenomeGraph) {
     if genome.nodes.is_empty() {
         return;
     }
