@@ -39,7 +39,7 @@ impl AttachFace {
         self.normal() * half_extents
     }
 
-    const ALL: [AttachFace; 6] = [
+    pub const ALL: [AttachFace; 6] = [
         AttachFace::PosX,
         AttachFace::NegX,
         AttachFace::PosY,
