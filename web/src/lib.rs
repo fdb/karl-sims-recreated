@@ -1,3 +1,4 @@
+mod camera;
 mod gpu_types;
 mod renderer;
 
@@ -8,11 +9,13 @@ use glam::{Mat4, Vec3};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+use camera::OrbitCamera;
 use gpu_types::{CameraUniform, InstanceRaw, SceneUniform};
 use renderer::WgpuRenderer;
 
 struct AppState {
     renderer: WgpuRenderer,
+    camera: OrbitCamera,
     time: f64,
 }
 
@@ -40,7 +43,7 @@ pub async fn create_renderer(canvas_id: &str) {
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .expect("element is not a canvas");
 
-    let renderer = WgpuRenderer::new(canvas).await;
+    let renderer = WgpuRenderer::new(canvas.clone()).await;
 
     // Set up scene uniform (constant for now)
     let scene_uniform = SceneUniform {
@@ -54,10 +57,12 @@ pub async fn create_renderer(canvas_id: &str) {
     APP.with(|a| {
         *a.borrow_mut() = Some(AppState {
             renderer,
+            camera: OrbitCamera::new(),
             time: 0.0,
         });
     });
 
+    setup_mouse_events(&canvas);
     start_render_loop();
 }
 
@@ -74,23 +79,11 @@ fn tick(state: &mut AppState, dt: f64) {
     state.time += dt;
     let t = state.time as f32;
 
-    // Auto-orbit camera
-    let orbit_speed = 0.3_f32;
-    let orbit_radius = 12.0_f32;
-    let orbit_height = 5.0_f32;
-    let angle = t * orbit_speed;
-    let eye = Vec3::new(
-        angle.cos() * orbit_radius,
-        orbit_height,
-        angle.sin() * orbit_radius,
-    );
-    let center = Vec3::ZERO;
-    let up = Vec3::Y;
-
+    let eye = state.camera.eye();
+    let view = state.camera.view_matrix();
     let (width, height) = state.renderer.size();
     let aspect = width as f32 / height.max(1) as f32;
-    let view = Mat4::look_at_rh(eye, center, up);
-    let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 0.1, 100.0);
+    let proj = state.camera.projection_matrix(aspect);
     let view_proj = proj * view;
 
     let camera_uniform = CameraUniform {
@@ -123,6 +116,71 @@ fn tick(state: &mut AppState, dt: f64) {
 
     state.renderer.update_instances(&instances);
     state.renderer.render_frame();
+}
+
+fn setup_mouse_events(canvas: &web_sys::HtmlCanvasElement) {
+    let target: &web_sys::EventTarget = canvas.unchecked_ref();
+
+    // mousedown on canvas
+    let on_mousedown = Closure::<dyn FnMut(_)>::new(move |e: web_sys::MouseEvent| {
+        APP.with(|a| {
+            if let Some(ref mut state) = *a.borrow_mut() {
+                state.camera.on_mouse_down(e.client_x() as f32, e.client_y() as f32);
+            }
+        });
+    });
+    target
+        .add_event_listener_with_callback("mousedown", on_mousedown.as_ref().unchecked_ref())
+        .unwrap();
+    on_mousedown.forget();
+
+    // mouseup on window (catch releases outside canvas)
+    let on_mouseup = Closure::<dyn FnMut(_)>::new(move |_e: web_sys::MouseEvent| {
+        APP.with(|a| {
+            if let Some(ref mut state) = *a.borrow_mut() {
+                state.camera.on_mouse_up();
+            }
+        });
+    });
+    let window = web_sys::window().unwrap();
+    let window_target: &web_sys::EventTarget = window.unchecked_ref();
+    window_target
+        .add_event_listener_with_callback("mouseup", on_mouseup.as_ref().unchecked_ref())
+        .unwrap();
+    on_mouseup.forget();
+
+    // mousemove on canvas
+    let on_mousemove = Closure::<dyn FnMut(_)>::new(move |e: web_sys::MouseEvent| {
+        APP.with(|a| {
+            if let Some(ref mut state) = *a.borrow_mut() {
+                state.camera.on_mouse_move(e.client_x() as f32, e.client_y() as f32);
+            }
+        });
+    });
+    target
+        .add_event_listener_with_callback("mousemove", on_mousemove.as_ref().unchecked_ref())
+        .unwrap();
+    on_mousemove.forget();
+
+    // wheel on canvas with passive: false
+    let on_wheel = Closure::<dyn FnMut(_)>::new(move |e: web_sys::WheelEvent| {
+        e.prevent_default();
+        APP.with(|a| {
+            if let Some(ref mut state) = *a.borrow_mut() {
+                state.camera.on_wheel(e.delta_y() as f32);
+            }
+        });
+    });
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_passive(false);
+    target
+        .add_event_listener_with_callback_and_add_event_listener_options(
+            "wheel",
+            on_wheel.as_ref().unchecked_ref(),
+            &opts,
+        )
+        .unwrap();
+    on_wheel.forget();
 }
 
 fn start_render_loop() {
