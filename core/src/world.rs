@@ -75,6 +75,9 @@ pub struct World {
     pub water_viscosity: f64,
     pub collisions_enabled: bool,
     suggested_dt: f64,
+    pub root_velocity: DVec3,
+    pub root_angular_velocity: DVec3,
+    last_root_accel: SVec6,
 }
 
 impl World {
@@ -91,6 +94,9 @@ impl World {
             water_viscosity: crate::water::DEFAULT_VISCOSITY,
             collisions_enabled: false,
             suggested_dt: 1.0 / 120.0,
+            root_velocity: DVec3::ZERO,
+            root_angular_velocity: DVec3::ZERO,
+            last_root_accel: SVec6::ZERO,
         }
     }
 
@@ -186,7 +192,9 @@ impl World {
         let mut fstate =
             FeatherstoneState::from_world(&self.bodies, &self.joints, &self.torques);
         let mut ext_forces = vec![SVec6::ZERO; self.bodies.len()];
-        let _ = fstate.compute_accelerations(self.gravity, &ext_forces);
+        let floating = self.water_enabled;
+        let root_vel = SVec6::new(self.root_angular_velocity, self.root_velocity);
+        let _ = fstate.compute_accelerations(self.gravity, &ext_forces, root_vel, floating);
         let body_vels = fstate.body_velocities();
 
         // Compute external forces from water drag
@@ -231,7 +239,8 @@ impl World {
         // Re-run Featherstone with external forces
         let mut fstate2 =
             FeatherstoneState::from_world(&self.bodies, &self.joints, &self.torques);
-        let qddot = fstate2.compute_accelerations(self.gravity, &ext_forces);
+        let (qddot, root_accel) = fstate2.compute_accelerations(self.gravity, &ext_forces, root_vel, floating);
+        self.last_root_accel = root_accel;
 
         // Build derivative
         let n = state.angles.len();
@@ -352,6 +361,30 @@ impl World {
             remaining -= dt_used;
             dt = dt_next;
             self.suggested_dt = dt;
+        }
+
+        // Integrate root body velocity and position for floating base (swimming)
+        if self.water_enabled {
+            let root_accel = self.last_root_accel;
+            // Subtract gravity spatial from root_accel to get actual acceleration
+            // (root_accel includes the gravity trick, so actual = root_accel - gravity_spatial)
+            let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
+            let actual_accel = root_accel - gravity_spatial;
+
+            self.root_velocity += actual_accel.linear() * frame_dt;
+            self.root_angular_velocity += actual_accel.angular() * frame_dt;
+
+            let displacement = self.root_velocity * frame_dt;
+            self.transforms[self.root].translation += displacement;
+
+            // Apply angular velocity to root rotation
+            let ang = self.root_angular_velocity;
+            let ang_mag = ang.length();
+            if ang_mag > 1e-10 {
+                let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * frame_dt);
+                let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
+                self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
+            }
         }
 
         self.forward_kinematics();

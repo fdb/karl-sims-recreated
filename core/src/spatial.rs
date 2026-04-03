@@ -185,6 +185,65 @@ impl SMat6 {
     }
 }
 
+impl SMat6 {
+    /// Solve Ax = b via Gaussian elimination with partial pivoting.
+    /// Returns x. Returns SVec6::ZERO if matrix is near-singular.
+    pub fn solve(&self, b: &SVec6) -> SVec6 {
+        // Copy matrix and RHS for in-place modification
+        let mut a = self.0;
+        let mut x = b.0;
+
+        // Forward elimination with partial pivoting
+        for col in 0..6 {
+            // Find pivot
+            let mut max_row = col;
+            let mut max_val = a[col][col].abs();
+            for row in (col + 1)..6 {
+                if a[col][row].abs() > max_val {
+                    max_val = a[col][row].abs();
+                    max_row = row;
+                }
+            }
+
+            // Swap rows
+            if max_row != col {
+                for c in 0..6 {
+                    a[c].swap(col, max_row);
+                }
+                x.swap(col, max_row);
+            }
+
+            let pivot = a[col][col];
+            if pivot.abs() < 1e-20 {
+                // Near-singular, return zero
+                return SVec6::ZERO;
+            }
+
+            // Eliminate below
+            for row in (col + 1)..6 {
+                let factor = a[col][row] / pivot;
+                for c in (col + 1)..6 {
+                    a[c][row] -= factor * a[c][col];
+                }
+                x[row] -= factor * x[col];
+                a[col][row] = 0.0;
+            }
+        }
+
+        // Back substitution
+        let mut result = [0.0; 6];
+        for col in (0..6).rev() {
+            let mut sum = x[col];
+            for c in (col + 1)..6 {
+                sum -= a[c][col] * result[c];
+            }
+            result[col] = sum / a[col][col];
+        }
+
+        SVec6(result)
+    }
+}
+
 impl Add for SMat6 {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
@@ -427,6 +486,23 @@ mod tests {
             approx_eq(lhs, rhs),
             "virtual work failed: {lhs} vs {rhs}"
         );
+    }
+
+    #[test]
+    fn smat6_solve() {
+        let a = SMat6::from_body_inertia(DVec3::new(1.0, 2.0, 3.0), 5.0);
+        let b = SVec6([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let x = a.solve(&b);
+        // Verify A*x = b
+        let ax = a.mul_vec(&x);
+        for i in 0..6 {
+            assert!(
+                (ax.0[i] - b.0[i]).abs() < 1e-8,
+                "solve failed at index {i}: {} vs {}",
+                ax.0[i],
+                b.0[i]
+            );
+        }
     }
 
     #[test]

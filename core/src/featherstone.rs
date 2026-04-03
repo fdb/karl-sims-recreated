@@ -231,13 +231,23 @@ impl FeatherstoneState {
         }
     }
 
-    /// Run the three-pass ABA. Returns per-expanded-joint accelerations.
-    pub fn compute_accelerations(&mut self, gravity: DVec3, external_forces: &[SVec6]) -> Vec<f64> {
+    /// Run the three-pass ABA. Returns (per-expanded-joint accelerations, root acceleration).
+    ///
+    /// When `floating_base` is true, the root body is free to accelerate
+    /// (needed for swimming creatures). `root_velocity` is the current
+    /// spatial velocity of the root body.
+    pub fn compute_accelerations(
+        &mut self,
+        gravity: DVec3,
+        external_forces: &[SVec6],
+        root_velocity: SVec6,
+        floating_base: bool,
+    ) -> (Vec<f64>, SVec6) {
         let nb = self.body_inertias.len();
         let nj = self.fjoints.len();
 
         // Initialize
-        self.velocities[0] = SVec6::ZERO;
+        self.velocities[0] = root_velocity;
         for i in 0..nb {
             self.art_inertias[i] = self.body_inertias[i];
             self.bias_forces[i] = SVec6::ZERO;
@@ -328,8 +338,17 @@ impl FeatherstoneState {
         }
 
         // ── Pass 3: Outward (root → leaves) ──
-        // Root acceleration encodes gravity
-        self.accelerations[0] = SVec6::new(DVec3::ZERO, -gravity);
+        let gravity_spatial = SVec6::new(DVec3::ZERO, -gravity);
+        if floating_base {
+            // Floating base: solve for root acceleration from articulated dynamics
+            let ext_root = external_forces.get(0).copied().unwrap_or(SVec6::ZERO);
+            let rhs = ext_root - self.bias_forces[0];
+            let a_dynamic = self.art_inertias[0].solve(&rhs);
+            self.accelerations[0] = a_dynamic + gravity_spatial;
+        } else {
+            // Fixed base: root acceleration just encodes gravity
+            self.accelerations[0] = gravity_spatial;
+        }
 
         let mut qddot = vec![0.0; nj];
         for j in 0..nj {
@@ -351,7 +370,8 @@ impl FeatherstoneState {
             self.accelerations[child] = a_child;
         }
 
-        qddot
+        let root_accel = self.accelerations[0];
+        (qddot, root_accel)
     }
 
     pub fn fjoints(&self) -> &[FJoint] {
@@ -414,7 +434,7 @@ mod tests {
         // → negative angular acceleration about Z.
         {
             let mut state = FeatherstoneState::from_world(&bodies, &[joint.clone()], &[[0.0; 3]]);
-            let qddot = state.compute_accelerations(gravity, &vec![SVec6::ZERO; 2]);
+            let (qddot, _) = state.compute_accelerations(gravity, &vec![SVec6::ZERO; 2], SVec6::ZERO, false);
             assert!(
                 qddot[0] < -1.0,
                 "At angle 0, expected significant negative accel, got {}",
@@ -431,7 +451,7 @@ mod tests {
             joint2.angles[0] = std::f64::consts::FRAC_PI_2;
             joint2.angle_max = [3.0; 3]; // widen limits to avoid limit torque
             let mut state = FeatherstoneState::from_world(&bodies, &[joint2], &[[0.0; 3]]);
-            let qddot = state.compute_accelerations(gravity, &vec![SVec6::ZERO; 2]);
+            let (qddot, _) = state.compute_accelerations(gravity, &vec![SVec6::ZERO; 2], SVec6::ZERO, false);
             assert!(
                 qddot[0].abs() < 0.5,
                 "At angle π/2 (arm along gravity), expected near-zero accel, got {}",
@@ -452,7 +472,7 @@ mod tests {
 
         // Apply torque 5.0, no gravity
         let mut state = FeatherstoneState::from_world(&bodies, &[joint], &[[5.0, 0.0, 0.0]]);
-        let qddot = state.compute_accelerations(DVec3::ZERO, &vec![SVec6::ZERO; 2]);
+        let (qddot, _) = state.compute_accelerations(DVec3::ZERO, &vec![SVec6::ZERO; 2], SVec6::ZERO, false);
 
         assert!(
             qddot[0] > 0.0,
@@ -483,7 +503,7 @@ mod tests {
         );
 
         let mut state = FeatherstoneState::from_world(&bodies, &[joint], &[[0.0; 3]]);
-        let qddot = state.compute_accelerations(DVec3::ZERO, &vec![SVec6::ZERO; 2]);
+        let (qddot, _) = state.compute_accelerations(DVec3::ZERO, &vec![SVec6::ZERO; 2], SVec6::ZERO, false);
 
         assert!(
             qddot[0].abs() < EPS,
@@ -549,7 +569,7 @@ mod tests {
             SVec6::new(DVec3::new(0.0, 0.0, 10.0), DVec3::ZERO),
         ];
         let mut state = FeatherstoneState::from_world(&bodies, &[joint], &[[0.0; 3]]);
-        let qddot = state.compute_accelerations(DVec3::ZERO, &ext);
+        let (qddot, _) = state.compute_accelerations(DVec3::ZERO, &ext, SVec6::ZERO, false);
         assert!(qddot[0].abs() > 0.1, "external force should produce accel: {}", qddot[0]);
     }
 
@@ -559,7 +579,7 @@ mod tests {
         let mut joint = Joint::revolute(0, 1, DVec3::X, DVec3::ZERO, DVec3::Z);
         joint.velocities[0] = 2.0;
         let mut state = FeatherstoneState::from_world(&bodies, &[joint], &[[0.0; 3]]);
-        state.compute_accelerations(DVec3::ZERO, &[SVec6::ZERO, SVec6::ZERO]);
+        state.compute_accelerations(DVec3::ZERO, &[SVec6::ZERO, SVec6::ZERO], SVec6::ZERO, false);
         let vels = state.body_velocities();
         assert!(vels.len() >= 2);
         let v1_len = vels[1].angular().length() + vels[1].linear().length();
