@@ -1,4 +1,5 @@
 use glam::DVec3;
+use crate::spatial::SMat6;
 
 #[derive(Debug, Clone)]
 pub struct RigidBody {
@@ -21,6 +22,10 @@ impl RigidBody {
             mass,
             inertia_diag: DVec3::new(ixx, iyy, izz),
         }
+    }
+
+    pub fn spatial_inertia(&self) -> SMat6 {
+        SMat6::from_body_inertia(self.inertia_diag, self.mass)
     }
 }
 
