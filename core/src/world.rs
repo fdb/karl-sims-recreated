@@ -3,6 +3,7 @@ use glam::{DAffine3, DMat3, DQuat, DVec3};
 use crate::body::RigidBody;
 use crate::featherstone::FeatherstoneState;
 use crate::joint::Joint;
+use crate::spatial::SVec6;
 
 #[derive(Debug, Clone)]
 pub struct World {
@@ -83,7 +84,8 @@ impl World {
         let mut state = FeatherstoneState::from_world(
             &self.bodies, &self.joints, &self.torques,
         );
-        let qddot = state.compute_accelerations(self.gravity);
+        let empty_forces = vec![SVec6::ZERO; self.bodies.len()];
+        let qddot = state.compute_accelerations(self.gravity, &empty_forces);
 
         // Map expanded joint accelerations back to original joints
         // and integrate with semi-implicit Euler
