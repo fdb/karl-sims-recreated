@@ -27,6 +27,7 @@ enum SceneId {
     TripleChain,
     SwimmingStarfish,
     RandomCreature,
+    MiniEvolution,
 }
 
 struct AppState {
@@ -109,6 +110,7 @@ fn build_world(scene_id: SceneId) -> World {
         SceneId::TripleChain => scene::triple_chain(),
         SceneId::SwimmingStarfish => scene::swimming_starfish(),
         SceneId::RandomCreature => World::new(), // handled via Creature path
+        SceneId::MiniEvolution => World::new(),   // handled via Creature path
     }
 }
 
@@ -116,6 +118,43 @@ fn build_world(scene_id: SceneId) -> World {
 pub fn set_scene(name: &str) {
     APP.with(|a| {
         if let Some(ref mut state) = *a.borrow_mut() {
+            if name == "mini_evolution" {
+                log::info!("Starting mini evolution...");
+                use karl_sims_core::rand::SeedableRng;
+                let mut rng = karl_sims_core::rand_chacha::ChaCha8Rng::seed_from_u64(42);
+                use karl_sims_core::evolution::{EvolutionConfig, Population};
+                use karl_sims_core::fitness::FitnessConfig;
+
+                let config = EvolutionConfig {
+                    population_size: 15,
+                    fitness: FitnessConfig {
+                        sim_duration: 2.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let mut pop = Population::random_initial(config, &mut rng);
+                for generation in 0..3 {
+                    pop.evolve_generation(&mut rng);
+                    if let Some(stats) = pop.stats_history.last() {
+                        log::info!(
+                            "Gen {}: best={:.4}, avg={:.4}",
+                            generation,
+                            stats.best_fitness,
+                            stats.avg_fitness
+                        );
+                    }
+                }
+
+                // Display best creature
+                if let Some(best) = pop.best() {
+                    let creature =
+                        karl_sims_core::creature::Creature::from_genome(best.genome.clone());
+                    state.creature = Some(creature);
+                    state.scene_id = SceneId::MiniEvolution;
+                }
+                return;
+            }
             if name == "random_creature" {
                 let creature = scene::random_creature(42);
                 state.world = World::new();
@@ -222,6 +261,7 @@ fn tick(state: &mut AppState, _dt: f64) {
                 SceneId::TripleChain => scene::triple_chain_torque(&mut state.world),
                 SceneId::SwimmingStarfish => scene::swimming_starfish_torques(&mut state.world),
                 SceneId::RandomCreature => {} // handled above
+                SceneId::MiniEvolution => {} // handled via creature path
             }
             state.world.step(1.0 / 60.0);
         }

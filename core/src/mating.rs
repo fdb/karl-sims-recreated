@@ -1,6 +1,6 @@
 use rand::Rng;
 
-use crate::genotype::{AttachFace, GenomeGraph, MorphConn};
+use crate::genotype::{AttachFace, GenomeGraph, MorphConn, MorphNode};
 use crate::mutation;
 
 // ---------------------------------------------------------------------------

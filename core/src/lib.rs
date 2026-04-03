@@ -14,3 +14,7 @@ pub mod brain;
 pub mod creature;
 pub mod mating;
 pub mod fitness;
+pub mod evolution;
+
+pub use rand;
+pub use rand_chacha;

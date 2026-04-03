@@ -5,6 +5,7 @@ use crate::genotype::GenomeGraph;
 // Config
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct FitnessConfig {
     pub sim_duration: f64,
     pub dt: f64,
