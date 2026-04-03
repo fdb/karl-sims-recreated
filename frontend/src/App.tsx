@@ -1,9 +1,19 @@
-import { useEffect, useRef } from "react";
-import { initWasm, create_renderer } from "./wasm";
+import { useEffect, useRef, useState } from "react";
+import { initWasm, create_renderer, set_scene, set_paused, reset_scene } from "./wasm";
+import "./App.css";
+
+const SCENES = [
+  { value: "starfish", label: "Starfish (4 flippers)" },
+  { value: "hinged_pair", label: "Hinged Pair" },
+  { value: "single_box", label: "Single Box" },
+];
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const initedRef = useRef(false);
+  const [currentScene, setCurrentScene] = useState("starfish");
+  const [paused, setPaused] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     if (initedRef.current) return;
@@ -13,12 +23,50 @@ export default function App() {
       await initWasm();
       await create_renderer("sim-canvas");
       console.log("Renderer created");
+      setReady(true);
     })();
   }, []);
 
+  const handleSceneChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const scene = e.target.value;
+    setCurrentScene(scene);
+    set_scene(scene);
+    setPaused(false);
+    set_paused(false);
+  };
+
+  const handlePlayPause = () => {
+    const next = !paused;
+    setPaused(next);
+    set_paused(next);
+  };
+
+  const handleReset = () => {
+    reset_scene();
+    setPaused(false);
+    set_paused(false);
+  };
+
   return (
     <div className="app">
+      <h1>Evolving Virtual Creatures</h1>
+      <div className="controls">
+        <select value={currentScene} onChange={handleSceneChange} disabled={!ready}>
+          {SCENES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+        <button onClick={handlePlayPause} disabled={!ready}>
+          {paused ? "Play" : "Pause"}
+        </button>
+        <button onClick={handleReset} disabled={!ready}>
+          Reset
+        </button>
+      </div>
       <canvas ref={canvasRef} id="sim-canvas" width={960} height={640} />
+      <p className="hint">Drag to orbit. Scroll to zoom.</p>
     </div>
   );
 }
