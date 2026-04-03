@@ -10,6 +10,7 @@ const SCENES = [
   { id: "spherical", label: "Spherical Joint (3-DOF)" },
   { id: "swimming_starfish", label: "Swimming Starfish (water)" },
   { id: "single_box", label: "Single Box" },
+  { id: "random_creature", label: "Random Creature" },
 ];
 
 export default function App() {

@@ -1,5 +1,9 @@
 use glam::{DAffine3, DVec3};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
+use crate::creature::Creature;
+use crate::genotype::GenomeGraph;
 use crate::joint::Joint;
 use crate::water;
 use crate::world::World;
@@ -208,6 +212,12 @@ pub fn swimming_starfish() -> World {
 
 pub fn swimming_starfish_torques(world: &mut World) {
     starfish_torques(world);
+}
+
+pub fn random_creature(seed: u64) -> Creature {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let genome = GenomeGraph::random(&mut rng);
+    Creature::from_genome(genome)
 }
 
 pub fn triple_chain_torque(world: &mut World) {

@@ -10,3 +10,4 @@ pub mod integrator;
 pub mod genotype;
 pub mod phenotype;
 pub mod brain;
+pub mod creature;

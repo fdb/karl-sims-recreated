@@ -9,6 +9,7 @@ use glam::{Affine3A, DAffine3, DMat3, DVec3, Mat4, Vec3};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+use karl_sims_core::creature::Creature;
 use karl_sims_core::scene;
 use karl_sims_core::world::World;
 
@@ -25,12 +26,14 @@ enum SceneId {
     SphericalJoint,
     TripleChain,
     SwimmingStarfish,
+    RandomCreature,
 }
 
 struct AppState {
     renderer: WgpuRenderer,
     camera: OrbitCamera,
     world: World,
+    creature: Option<Creature>,
     scene_id: SceneId,
     paused: bool,
 }
@@ -77,6 +80,7 @@ pub async fn create_renderer(canvas_id: &str) {
             renderer,
             camera: OrbitCamera::new(),
             world,
+            creature: None,
             scene_id: SceneId::Starfish,
             paused: false,
         });
@@ -104,6 +108,7 @@ fn build_world(scene_id: SceneId) -> World {
         SceneId::SphericalJoint => scene::spherical_joint_demo(),
         SceneId::TripleChain => scene::triple_chain(),
         SceneId::SwimmingStarfish => scene::swimming_starfish(),
+        SceneId::RandomCreature => World::new(), // handled via Creature path
     }
 }
 
@@ -111,6 +116,13 @@ fn build_world(scene_id: SceneId) -> World {
 pub fn set_scene(name: &str) {
     APP.with(|a| {
         if let Some(ref mut state) = *a.borrow_mut() {
+            if name == "random_creature" {
+                let creature = scene::random_creature(42);
+                state.world = World::new();
+                state.creature = Some(creature);
+                state.scene_id = SceneId::RandomCreature;
+                return;
+            }
             let scene_id = match name {
                 "single_box" => SceneId::SingleBox,
                 "hinged_pair" => SceneId::HingedPair,
@@ -121,6 +133,7 @@ pub fn set_scene(name: &str) {
                 _ => SceneId::Starfish,
             };
             state.scene_id = scene_id;
+            state.creature = None;
             state.world = build_world(scene_id);
         }
     });
@@ -139,47 +152,22 @@ pub fn set_paused(paused: bool) {
 pub fn reset_scene() {
     APP.with(|a| {
         if let Some(ref mut state) = *a.borrow_mut() {
-            state.world = build_world(state.scene_id);
+            if state.scene_id == SceneId::RandomCreature {
+                state.creature = Some(scene::random_creature(42));
+            } else {
+                state.creature = None;
+                state.world = build_world(state.scene_id);
+            }
         }
     });
 }
 
-fn tick(state: &mut AppState, _dt: f64) {
-    // 1. Physics step
-    if !state.paused {
-        match state.scene_id {
-            SceneId::SingleBox => {}
-            SceneId::HingedPair => scene::hinged_pair_torque(&mut state.world),
-            SceneId::Starfish => scene::starfish_torques(&mut state.world),
-            SceneId::UniversalJoint => scene::universal_joint_torque(&mut state.world),
-            SceneId::SphericalJoint => scene::spherical_joint_torque(&mut state.world),
-            SceneId::TripleChain => scene::triple_chain_torque(&mut state.world),
-            SceneId::SwimmingStarfish => scene::swimming_starfish_torques(&mut state.world),
-        }
-        state.world.step(1.0 / 60.0);
-    }
-
-    // 2. Camera uniform
-    let eye = state.camera.eye();
-    let view = state.camera.view_matrix();
-    let (width, height) = state.renderer.size();
-    let aspect = width as f32 / height.max(1) as f32;
-    let proj = state.camera.projection_matrix(aspect);
-    let view_proj = proj * view;
-
-    let camera_uniform = CameraUniform {
-        view_proj: view_proj.to_cols_array_2d(),
-        camera_pos: eye.to_array(),
-        _pad: 0.0,
-    };
-    state.renderer.update_camera(&camera_uniform);
-
-    // 3. Build instances from physics bodies
+fn build_instances(world: &World) -> Vec<InstanceRaw> {
     let cream = [0.92f32, 0.90, 0.85];
-    let mut instances = Vec::with_capacity(state.world.bodies.len() + 1);
+    let mut instances = Vec::with_capacity(world.bodies.len() + 1);
 
-    for (i, body) in state.world.bodies.iter().enumerate() {
-        let t = &state.world.transforms[i];
+    for (i, body) in world.bodies.iter().enumerate() {
+        let t = &world.transforms[i];
         let scale = DVec3::new(
             body.half_extents.x * 2.0,
             body.half_extents.y * 2.0,
@@ -208,7 +196,7 @@ fn tick(state: &mut AppState, _dt: f64) {
         });
     }
 
-    // 4. Ground plane
+    // Ground plane
     let ground = Mat4::from_scale(Vec3::new(30.0, 0.05, 30.0));
     instances.push(InstanceRaw {
         model: ground.to_cols_array_2d(),
@@ -216,7 +204,53 @@ fn tick(state: &mut AppState, _dt: f64) {
         flags: 1,
     });
 
-    // 5. Update and render
+    instances
+}
+
+fn tick(state: &mut AppState, _dt: f64) {
+    // 1. Physics step
+    if !state.paused {
+        if let Some(ref mut creature) = state.creature {
+            creature.step(1.0 / 60.0);
+        } else {
+            match state.scene_id {
+                SceneId::SingleBox => {}
+                SceneId::HingedPair => scene::hinged_pair_torque(&mut state.world),
+                SceneId::Starfish => scene::starfish_torques(&mut state.world),
+                SceneId::UniversalJoint => scene::universal_joint_torque(&mut state.world),
+                SceneId::SphericalJoint => scene::spherical_joint_torque(&mut state.world),
+                SceneId::TripleChain => scene::triple_chain_torque(&mut state.world),
+                SceneId::SwimmingStarfish => scene::swimming_starfish_torques(&mut state.world),
+                SceneId::RandomCreature => {} // handled above
+            }
+            state.world.step(1.0 / 60.0);
+        }
+    }
+
+    // 2. Camera uniform
+    let eye = state.camera.eye();
+    let view = state.camera.view_matrix();
+    let (width, height) = state.renderer.size();
+    let aspect = width as f32 / height.max(1) as f32;
+    let proj = state.camera.projection_matrix(aspect);
+    let view_proj = proj * view;
+
+    let camera_uniform = CameraUniform {
+        view_proj: view_proj.to_cols_array_2d(),
+        camera_pos: eye.to_array(),
+        _pad: 0.0,
+    };
+    state.renderer.update_camera(&camera_uniform);
+
+    // 3. Build instances from the appropriate world
+    let render_world = if let Some(ref creature) = state.creature {
+        &creature.world
+    } else {
+        &state.world
+    };
+    let instances = build_instances(render_world);
+
+    // 4. Update and render
     state.renderer.update_instances(&instances);
     state.renderer.render_frame();
 }
