@@ -3,9 +3,12 @@ import { initWasm, create_renderer, set_scene, set_paused, reset_scene } from ".
 import "./App.css";
 
 const SCENES = [
-  { value: "starfish", label: "Starfish (4 flippers)" },
-  { value: "hinged_pair", label: "Hinged Pair" },
-  { value: "single_box", label: "Single Box" },
+  { id: "starfish", label: "Starfish (4 flippers)" },
+  { id: "hinged_pair", label: "Hinged Pair" },
+  { id: "triple_chain", label: "Triple Chain" },
+  { id: "universal", label: "Universal Joint (2-DOF)" },
+  { id: "spherical", label: "Spherical Joint (3-DOF)" },
+  { id: "single_box", label: "Single Box" },
 ];
 
 export default function App() {
@@ -53,7 +56,7 @@ export default function App() {
       <div className="controls">
         <select value={currentScene} onChange={handleSceneChange} disabled={!ready}>
           {SCENES.map((s) => (
-            <option key={s.value} value={s.value}>
+            <option key={s.id} value={s.id}>
               {s.label}
             </option>
           ))}

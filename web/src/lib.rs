@@ -21,6 +21,9 @@ enum SceneId {
     SingleBox,
     HingedPair,
     Starfish,
+    UniversalJoint,
+    SphericalJoint,
+    TripleChain,
 }
 
 struct AppState {
@@ -96,6 +99,9 @@ fn build_world(scene_id: SceneId) -> World {
         SceneId::SingleBox => scene::single_box(),
         SceneId::HingedPair => scene::hinged_pair(),
         SceneId::Starfish => scene::starfish(),
+        SceneId::UniversalJoint => scene::universal_joint_demo(),
+        SceneId::SphericalJoint => scene::spherical_joint_demo(),
+        SceneId::TripleChain => scene::triple_chain(),
     }
 }
 
@@ -106,6 +112,9 @@ pub fn set_scene(name: &str) {
             let scene_id = match name {
                 "single_box" => SceneId::SingleBox,
                 "hinged_pair" => SceneId::HingedPair,
+                "universal" => SceneId::UniversalJoint,
+                "spherical" => SceneId::SphericalJoint,
+                "triple_chain" => SceneId::TripleChain,
                 _ => SceneId::Starfish,
             };
             state.scene_id = scene_id;
@@ -139,6 +148,9 @@ fn tick(state: &mut AppState, _dt: f64) {
             SceneId::SingleBox => {}
             SceneId::HingedPair => scene::hinged_pair_torque(&mut state.world),
             SceneId::Starfish => scene::starfish_torques(&mut state.world),
+            SceneId::UniversalJoint => scene::universal_joint_torque(&mut state.world),
+            SceneId::SphericalJoint => scene::spherical_joint_torque(&mut state.world),
+            SceneId::TripleChain => scene::triple_chain_torque(&mut state.world),
         }
         state.world.step(1.0 / 60.0);
     }
