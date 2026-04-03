@@ -13,6 +13,7 @@ use crate::world::World;
 #[derive(Debug, Clone)]
 pub enum SensorType {
     JointAngle { joint_idx: usize, dof: usize },
+    PhotoSensor { body_idx: usize, axis: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +67,14 @@ pub fn develop(genome: &GenomeGraph) -> Phenotype {
     world.root = root_body;
     body_node_map.push((genome.root, 0));
     visit_count[genome.root] += 1;
+
+    // Photosensors for root body (3 axes: X, Y, Z).
+    for axis in 0..3 {
+        sensor_map.push(SensorInfo {
+            body_idx: root_body,
+            sensor_type: SensorType::PhotoSensor { body_idx: root_body, axis },
+        });
+    }
 
     // BFS queue: (genotype node index, body index in world, recursion depth)
     let mut queue: VecDeque<(usize, usize, u32)> = VecDeque::new();
@@ -140,6 +149,14 @@ pub fn develop(genome: &GenomeGraph) -> Phenotype {
                 });
             }
 
+            // Photosensors for child body (3 axes: X, Y, Z).
+            for axis in 0..3 {
+                sensor_map.push(SensorInfo {
+                    body_idx: child_body,
+                    sensor_type: SensorType::PhotoSensor { body_idx: child_body, axis },
+                });
+            }
+
             // Continue traversal from child.
             queue.push_back((conn.target, child_body, child_depth));
         }
@@ -199,7 +216,7 @@ mod tests {
         let pheno = develop(&genome);
         assert_eq!(pheno.world.bodies.len(), 1, "single node → 1 body");
         assert_eq!(pheno.world.joints.len(), 0, "single node → 0 joints");
-        assert_eq!(pheno.sensor_map.len(), 0, "single node → 0 sensors");
+        assert_eq!(pheno.sensor_map.len(), 3, "single node → 3 photosensors");
         assert_eq!(pheno.body_node_map.len(), 1);
         assert_eq!(pheno.body_node_map[0], (0, 0));
     }
@@ -230,15 +247,25 @@ mod tests {
 
             // Sensor joint indices must be valid.
             for sensor in &pheno.sensor_map {
-                let SensorType::JointAngle { joint_idx, dof } = sensor.sensor_type;
-                assert!(
-                    joint_idx < pheno.world.joints.len(),
-                    "seed {seed}: bad sensor joint_idx"
-                );
-                assert!(
-                    dof < pheno.world.joints[joint_idx].joint_type.dof_count(),
-                    "seed {seed}: bad sensor dof"
-                );
+                match sensor.sensor_type {
+                    SensorType::JointAngle { joint_idx, dof } => {
+                        assert!(
+                            joint_idx < pheno.world.joints.len(),
+                            "seed {seed}: bad sensor joint_idx"
+                        );
+                        assert!(
+                            dof < pheno.world.joints[joint_idx].joint_type.dof_count(),
+                            "seed {seed}: bad sensor dof"
+                        );
+                    }
+                    SensorType::PhotoSensor { body_idx, axis } => {
+                        assert!(
+                            body_idx < pheno.world.bodies.len(),
+                            "seed {seed}: bad photosensor body_idx"
+                        );
+                        assert!(axis < 3, "seed {seed}: bad photosensor axis");
+                    }
+                }
             }
         }
     }
@@ -301,7 +328,7 @@ mod tests {
             JointType::Revolute,
             "revolute joint"
         );
-        assert_eq!(pheno.sensor_map.len(), 1, "revolute → 1 sensor (1 DOF)");
+        assert_eq!(pheno.sensor_map.len(), 7, "revolute → 1 joint angle + 6 photosensors (2 bodies × 3)");
 
         // Joint limits should match genotype.
         assert!((pheno.world.joints[0].angle_min[0] - (-0.5)).abs() < 1e-10);

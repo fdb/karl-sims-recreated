@@ -170,6 +170,18 @@ impl BrainInstance {
                 SensorType::JointAngle { joint_idx, dof } => {
                     self.sensors[i] = world.joints[joint_idx].angles[dof];
                 }
+                SensorType::PhotoSensor { body_idx, axis } => {
+                    let body_pos = world.transforms[body_idx].translation;
+                    let light_dir_world = (world.light_position - body_pos).normalize_or_zero();
+                    let body_rot_inv = world.transforms[body_idx].matrix3.transpose();
+                    let light_dir_local = body_rot_inv * light_dir_world;
+                    self.sensors[i] = match axis {
+                        0 => light_dir_local.x,
+                        1 => light_dir_local.y,
+                        2 => light_dir_local.z,
+                        _ => 0.0,
+                    };
+                }
             }
         }
     }

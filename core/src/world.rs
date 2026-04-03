@@ -78,6 +78,7 @@ pub struct World {
     pub root_velocity: DVec3,
     pub root_angular_velocity: DVec3,
     last_root_accel: SVec6,
+    pub light_position: DVec3,
 }
 
 impl World {
@@ -97,6 +98,7 @@ impl World {
             root_velocity: DVec3::ZERO,
             root_angular_velocity: DVec3::ZERO,
             last_root_accel: SVec6::ZERO,
+            light_position: DVec3::new(5.0, 0.0, 0.0),
         }
     }
 

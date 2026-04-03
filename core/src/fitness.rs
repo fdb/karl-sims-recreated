@@ -1,3 +1,5 @@
+use glam::DVec3;
+
 use crate::creature::Creature;
 use crate::genotype::GenomeGraph;
 
@@ -94,6 +96,113 @@ pub fn evaluate_swimming_fitness(
         distance,
         max_displacement,
         terminated_early,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Following fitness
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct FollowingFitnessConfig {
+    pub trial_duration: f64,
+    pub dt: f64,
+    pub max_parts: usize,
+    pub light_reposition_interval: f64,
+    pub num_trials: usize,
+}
+
+impl Default for FollowingFitnessConfig {
+    fn default() -> Self {
+        Self {
+            trial_duration: 10.0,
+            dt: 1.0 / 60.0,
+            max_parts: 20,
+            light_reposition_interval: 5.0,
+            num_trials: 4,
+        }
+    }
+}
+
+pub fn evaluate_following_fitness(
+    genome: &GenomeGraph,
+    config: &FollowingFitnessConfig,
+) -> FitnessResult {
+    let creature = Creature::from_genome(genome.clone());
+
+    // Viability check: too many parts -> zero fitness.
+    if creature.world.bodies.len() > config.max_parts {
+        return FitnessResult {
+            score: 0.0,
+            distance: 0.0,
+            max_displacement: 0.0,
+            terminated_early: true,
+        };
+    }
+
+    let light_positions = [
+        DVec3::new(5.0, 0.0, 0.0),
+        DVec3::new(-5.0, 0.0, 0.0),
+        DVec3::new(0.0, 0.0, 5.0),
+        DVec3::new(0.0, 0.0, -5.0),
+    ];
+
+    let mut total_score = 0.0;
+
+    for trial in 0..config.num_trials.min(light_positions.len()) {
+        let mut creature = Creature::from_genome(genome.clone());
+        let steps_per_trial = (config.trial_duration / config.dt) as usize;
+        let reposition_steps = (config.light_reposition_interval / config.dt) as usize;
+
+        let mut speed_toward_light_sum = 0.0;
+        let mut speed_samples = 0;
+
+        creature.world.light_position = light_positions[trial];
+
+        let mut prev_pos = creature.world.transforms[creature.world.root].translation;
+
+        for step in 0..steps_per_trial {
+            // Reposition light every N steps.
+            if step > 0 && step % reposition_steps == 0 {
+                let angle = (trial as f64 + step as f64 * 0.01) * 2.0;
+                creature.world.light_position = DVec3::new(
+                    5.0 * angle.cos(),
+                    0.0,
+                    5.0 * angle.sin(),
+                );
+            }
+
+            creature.step(config.dt);
+
+            let current_pos = creature.world.transforms[creature.world.root].translation;
+            let movement = current_pos - prev_pos;
+
+            // Speed toward the light = projection of movement onto light direction.
+            let to_light = (creature.world.light_position - current_pos).normalize_or_zero();
+            let speed_toward = movement.dot(to_light) / config.dt;
+
+            if speed_toward > 0.0 {
+                speed_toward_light_sum += speed_toward;
+            }
+            speed_samples += 1;
+
+            prev_pos = current_pos;
+        }
+
+        let avg_speed = if speed_samples > 0 {
+            speed_toward_light_sum / speed_samples as f64
+        } else {
+            0.0
+        };
+        total_score += avg_speed;
+    }
+
+    let score = total_score / config.num_trials as f64;
+    FitnessResult {
+        score,
+        distance: score,
+        max_displacement: 0.0,
+        terminated_early: false,
     }
 }
 
@@ -218,5 +327,54 @@ mod tests {
         assert_eq!(r1.distance, r2.distance);
         assert_eq!(r1.max_displacement, r2.max_displacement);
         assert_eq!(r1.terminated_early, r2.terminated_early);
+    }
+
+    #[test]
+    fn following_fitness_completes() {
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let genome = GenomeGraph::random(&mut rng);
+        let config = FollowingFitnessConfig {
+            trial_duration: 1.0,
+            num_trials: 2,
+            ..Default::default()
+        };
+        let result = evaluate_following_fitness(&genome, &config);
+        assert!(result.score >= 0.0);
+    }
+
+    #[test]
+    fn following_fitness_deterministic() {
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let genome = GenomeGraph::random(&mut rng);
+        let config = FollowingFitnessConfig {
+            trial_duration: 1.0,
+            num_trials: 2,
+            ..Default::default()
+        };
+        let r1 = evaluate_following_fitness(&genome, &config);
+        let r2 = evaluate_following_fitness(&genome, &config);
+        assert!((r1.score - r2.score).abs() < 1e-10);
+    }
+
+    #[test]
+    fn photosensors_created_for_all_bodies() {
+        use crate::phenotype::{develop, SensorType};
+
+        for seed in 0..10u64 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let genome = GenomeGraph::random(&mut rng);
+            let pheno = develop(&genome);
+            let num_bodies = pheno.world.bodies.len();
+            let num_photo = pheno
+                .sensor_map
+                .iter()
+                .filter(|s| matches!(s.sensor_type, SensorType::PhotoSensor { .. }))
+                .count();
+            assert_eq!(
+                num_photo,
+                num_bodies * 3,
+                "seed {seed}: {num_photo} photosensors for {num_bodies} bodies"
+            );
+        }
     }
 }
