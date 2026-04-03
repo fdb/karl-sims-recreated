@@ -28,6 +28,7 @@ enum SceneId {
     SwimmingStarfish,
     RandomCreature,
     MiniEvolution,
+    Following,
 }
 
 struct AppState {
@@ -111,6 +112,7 @@ fn build_world(scene_id: SceneId) -> World {
         SceneId::SwimmingStarfish => scene::swimming_starfish(),
         SceneId::RandomCreature => World::new(), // handled via Creature path
         SceneId::MiniEvolution => World::new(),   // handled via Creature path
+        SceneId::Following => World::new(),       // handled via Creature path
     }
 }
 
@@ -162,6 +164,14 @@ pub fn set_scene(name: &str) {
                 state.scene_id = SceneId::RandomCreature;
                 return;
             }
+            if name == "following" {
+                let mut creature = scene::random_creature(42);
+                creature.world.light_position = DVec3::new(5.0, 0.0, 0.0);
+                state.world = World::new();
+                state.creature = Some(creature);
+                state.scene_id = SceneId::Following;
+                return;
+            }
             let scene_id = match name {
                 "single_box" => SceneId::SingleBox,
                 "hinged_pair" => SceneId::HingedPair,
@@ -193,6 +203,10 @@ pub fn reset_scene() {
         if let Some(ref mut state) = *a.borrow_mut() {
             if state.scene_id == SceneId::RandomCreature {
                 state.creature = Some(scene::random_creature(42));
+            } else if state.scene_id == SceneId::Following {
+                let mut creature = scene::random_creature(42);
+                creature.world.light_position = DVec3::new(5.0, 0.0, 0.0);
+                state.creature = Some(creature);
             } else {
                 state.creature = None;
                 state.world = build_world(state.scene_id);
@@ -250,6 +264,12 @@ fn tick(state: &mut AppState, _dt: f64) {
     // 1. Physics step
     if !state.paused {
         if let Some(ref mut creature) = state.creature {
+            if state.scene_id == SceneId::Following {
+                let t = creature.world.time;
+                let angle = t * 0.2;
+                creature.world.light_position =
+                    DVec3::new(5.0 * angle.cos(), 0.0, 5.0 * angle.sin());
+            }
             creature.step(1.0 / 60.0);
         } else {
             match state.scene_id {
@@ -262,6 +282,7 @@ fn tick(state: &mut AppState, _dt: f64) {
                 SceneId::SwimmingStarfish => scene::swimming_starfish_torques(&mut state.world),
                 SceneId::RandomCreature => {} // handled above
                 SceneId::MiniEvolution => {} // handled via creature path
+                SceneId::Following => {}     // handled via creature path
             }
             state.world.step(1.0 / 60.0);
         }
@@ -288,7 +309,24 @@ fn tick(state: &mut AppState, _dt: f64) {
     } else {
         &state.world
     };
-    let instances = build_instances(render_world);
+    let mut instances = build_instances(render_world);
+
+    // Add light source marker when light position is active
+    if let Some(ref creature) = state.creature {
+        let light_pos = creature.world.light_position;
+        if light_pos.length_squared() > 0.01 {
+            let light_model = glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::splat(0.15),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(light_pos.x as f32, light_pos.y as f32, light_pos.z as f32),
+            );
+            instances.push(InstanceRaw {
+                model: light_model.to_cols_array_2d(),
+                color: [1.0, 0.9, 0.3],
+                flags: 0,
+            });
+        }
+    }
 
     // 4. Update and render
     state.renderer.update_instances(&instances);

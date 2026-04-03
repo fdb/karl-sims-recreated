@@ -14,6 +14,7 @@ const SCENES = [
   { id: "swimming_starfish", label: "Swimming Starfish (water)" },
   { id: "single_box", label: "Single Box" },
   { id: "random_creature", label: "Random Creature" },
+  { id: "following", label: "Following (light target)" },
   { id: "mini_evolution", label: "Mini Evolution (in-browser)" },
 ];
 
