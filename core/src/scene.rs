@@ -1,6 +1,7 @@
 use glam::{DAffine3, DVec3};
 
 use crate::joint::Joint;
+use crate::water;
 use crate::world::World;
 
 /// Single box at (0, 1, 0).
@@ -197,6 +198,18 @@ pub fn triple_chain() -> World {
     world
 }
 
+pub fn swimming_starfish() -> World {
+    let mut world = starfish();
+    world.water_enabled = true;
+    world.water_viscosity = water::DEFAULT_VISCOSITY;
+    world.gravity = DVec3::ZERO;
+    world
+}
+
+pub fn swimming_starfish_torques(world: &mut World) {
+    starfish_torques(world);
+}
+
 pub fn triple_chain_torque(world: &mut World) {
     let t = world.time;
     if world.torques.len() >= 2 {
@@ -278,5 +291,26 @@ mod tests {
         }
         assert!(world.joints[0].angles[0].abs() > 0.01);
         assert!(world.joints[0].angles[1].abs() > 0.01);
+    }
+
+    #[test]
+    fn swimming_starfish_scene() {
+        let world = swimming_starfish();
+        assert!(world.water_enabled);
+        assert_eq!(world.gravity, DVec3::ZERO);
+    }
+
+    #[test]
+    fn swimming_starfish_moves() {
+        let mut world = swimming_starfish();
+        // Check a flipper body (index 1) rather than the fixed root
+        let initial = world.transforms[1].translation;
+        for _ in 0..300 {
+            swimming_starfish_torques(&mut world);
+            world.step(1.0 / 60.0);
+        }
+        let final_pos = world.transforms[1].translation;
+        let dist = (final_pos - initial).length();
+        assert!(dist > 0.001, "starfish flipper should move through water: dist={dist}");
     }
 }

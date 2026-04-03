@@ -8,6 +8,7 @@ const SCENES = [
   { id: "triple_chain", label: "Triple Chain" },
   { id: "universal", label: "Universal Joint (2-DOF)" },
   { id: "spherical", label: "Spherical Joint (3-DOF)" },
+  { id: "swimming_starfish", label: "Swimming Starfish (water)" },
   { id: "single_box", label: "Single Box" },
 ];
 
