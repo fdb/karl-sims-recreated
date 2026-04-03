@@ -1,7 +1,10 @@
+mod api;
 mod coordinator;
 mod db;
 mod worker;
+mod ws;
 
+use api::AppState;
 use db::init_db;
 
 #[tokio::main]
@@ -22,22 +25,23 @@ async fn main() {
         });
     }
 
-    // Create a test evolution and run it.
-    let evo_id = {
-        let conn = db.lock().unwrap();
-        db::create_evolution(&conn, "{\"population_size\": 50}")
+    // Broadcast channel for live WebSocket updates.
+    let (tx, _) = tokio::sync::broadcast::channel::<String>(100);
+
+    let state = AppState {
+        db: db.clone(),
+        tx: tx.clone(),
     };
 
-    // Spawn coordinator.
-    let db_coord = db.clone();
-    tokio::spawn(async move {
-        coordinator::run_evolution(db_coord, evo_id).await;
-    });
+    // Build axum app: REST API + WebSocket + static file serving.
+    let app = api::routes()
+        .route("/api/live", ws::ws_route())
+        .with_state(state)
+        .fallback_service(tower_http::services::ServeDir::new("frontend/dist"));
 
-    // HTTP server placeholder (implemented in Task 3).
-    log::info!("Server running. Evolution {} started.", evo_id);
-
-    // Keep running until Ctrl-C.
-    tokio::signal::ctrl_c().await.ok();
-    log::info!("Shutting down");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .unwrap();
+    log::info!("HTTP server on http://localhost:3000");
+    axum::serve(listener, app).await.unwrap();
 }

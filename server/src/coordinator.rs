@@ -7,13 +7,15 @@ use karl_sims_core::fitness::FitnessConfig;
 use karl_sims_core::genotype::GenomeGraph;
 use karl_sims_core::evolution::Population;
 
+use tokio::sync::broadcast;
+
 use crate::db::{
     create_task, get_evolution_status, get_genotype, get_generation_fitnesses,
     insert_genotype, pending_task_count, update_evolution, DbPool,
 };
 
 /// Run a full evolution loop, persisting every generation to the database.
-pub async fn run_evolution(db: DbPool, evo_id: i64) {
+pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender<String>>) {
     let mut rng = ChaCha8Rng::seed_from_u64(evo_id as u64);
     let config = EvolutionConfig {
         population_size: 50,
@@ -88,6 +90,18 @@ pub async fn run_evolution(db: DbPool, evo_id: i64) {
             "Evolution {evo_id} Gen {cur_gen}: best={best:.4}, avg={avg:.4}, pop={}",
             individuals.len()
         );
+
+        // Broadcast generation stats to WebSocket clients.
+        if let Some(ref tx) = tx {
+            let msg = serde_json::json!({
+                "type": "generation",
+                "evolution_id": evo_id,
+                "generation": cur_gen,
+                "best_fitness": best,
+                "avg_fitness": avg,
+            });
+            tx.send(msg.to_string()).ok();
+        }
 
         // Handle the all-zero-fitness case: regenerate a random population.
         if individuals.is_empty() || best <= 0.0 {
