@@ -1,3 +1,4 @@
 /target
 web/pkg
 frontend/node_modules
+frontend/dist
