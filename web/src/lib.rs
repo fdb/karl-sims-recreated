@@ -5,18 +5,30 @@ mod renderer;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use glam::{Mat4, Vec3};
+use glam::{Affine3A, DAffine3, DMat3, DVec3, Mat4, Vec3};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+
+use karl_sims_core::scene;
+use karl_sims_core::world::World;
 
 use camera::OrbitCamera;
 use gpu_types::{CameraUniform, InstanceRaw, SceneUniform};
 use renderer::WgpuRenderer;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SceneId {
+    SingleBox,
+    HingedPair,
+    Starfish,
+}
+
 struct AppState {
     renderer: WgpuRenderer,
     camera: OrbitCamera,
-    time: f64,
+    world: World,
+    scene_id: SceneId,
+    paused: bool,
 }
 
 thread_local! {
@@ -54,11 +66,15 @@ pub async fn create_renderer(canvas_id: &str) {
     };
     renderer.update_scene(&scene_uniform);
 
+    let world = scene::starfish();
+
     APP.with(|a| {
         *a.borrow_mut() = Some(AppState {
             renderer,
             camera: OrbitCamera::new(),
-            time: 0.0,
+            world,
+            scene_id: SceneId::Starfish,
+            paused: false,
         });
     });
 
@@ -75,10 +91,59 @@ pub fn renderer_resize(width: u32, height: u32) {
     });
 }
 
-fn tick(state: &mut AppState, dt: f64) {
-    state.time += dt;
-    let t = state.time as f32;
+fn build_world(scene_id: SceneId) -> World {
+    match scene_id {
+        SceneId::SingleBox => scene::single_box(),
+        SceneId::HingedPair => scene::hinged_pair(),
+        SceneId::Starfish => scene::starfish(),
+    }
+}
 
+#[wasm_bindgen]
+pub fn set_scene(name: &str) {
+    APP.with(|a| {
+        if let Some(ref mut state) = *a.borrow_mut() {
+            let scene_id = match name {
+                "single_box" => SceneId::SingleBox,
+                "hinged_pair" => SceneId::HingedPair,
+                _ => SceneId::Starfish,
+            };
+            state.scene_id = scene_id;
+            state.world = build_world(scene_id);
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn set_paused(paused: bool) {
+    APP.with(|a| {
+        if let Some(ref mut state) = *a.borrow_mut() {
+            state.paused = paused;
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn reset_scene() {
+    APP.with(|a| {
+        if let Some(ref mut state) = *a.borrow_mut() {
+            state.world = build_world(state.scene_id);
+        }
+    });
+}
+
+fn tick(state: &mut AppState, _dt: f64) {
+    // 1. Physics step
+    if !state.paused {
+        match state.scene_id {
+            SceneId::SingleBox => {}
+            SceneId::HingedPair => scene::hinged_pair_torque(&mut state.world),
+            SceneId::Starfish => scene::starfish_torques(&mut state.world),
+        }
+        state.world.step(1.0 / 60.0);
+    }
+
+    // 2. Camera uniform
     let eye = state.camera.eye();
     let view = state.camera.view_matrix();
     let (width, height) = state.renderer.size();
@@ -93,27 +158,49 @@ fn tick(state: &mut AppState, dt: f64) {
     };
     state.renderer.update_camera(&camera_uniform);
 
-    // Instances: one cream cube slowly rotating, one ground plane
-    let cube_rotation = Mat4::from_rotation_y(t * 0.5);
-    let cube_translation = Mat4::from_translation(Vec3::new(0.0, 1.0, 0.0));
-    let cube_model = cube_translation * cube_rotation;
+    // 3. Build instances from physics bodies
+    let cream = [0.92f32, 0.90, 0.85];
+    let mut instances = Vec::with_capacity(state.world.bodies.len() + 1);
 
-    let ground_model =
-        Mat4::from_scale(Vec3::new(20.0, 0.05, 20.0));
-
-    let instances = [
-        InstanceRaw {
-            model: cube_model.to_cols_array_2d(),
-            color: [0.92, 0.90, 0.82], // cream
+    for (i, body) in state.world.bodies.iter().enumerate() {
+        let t = &state.world.transforms[i];
+        let scale = DVec3::new(
+            body.half_extents.x * 2.0,
+            body.half_extents.y * 2.0,
+            body.half_extents.z * 2.0,
+        );
+        let model_f64 = DAffine3 {
+            matrix3: DMat3::from_cols(
+                t.matrix3.col(0) * scale.x,
+                t.matrix3.col(1) * scale.y,
+                t.matrix3.col(2) * scale.z,
+            ),
+            translation: t.translation,
+        };
+        let model = Mat4::from(Affine3A::from_cols_array(&{
+            let m = model_f64.to_cols_array();
+            let mut out = [0.0f32; 12];
+            for i in 0..12 {
+                out[i] = m[i] as f32;
+            }
+            out
+        }));
+        instances.push(InstanceRaw {
+            model: model.to_cols_array_2d(),
+            color: cream,
             flags: 0,
-        },
-        InstanceRaw {
-            model: ground_model.to_cols_array_2d(),
-            color: [0.5, 0.5, 0.5], // unused for ground, but needed
-            flags: 1,
-        },
-    ];
+        });
+    }
 
+    // 4. Ground plane
+    let ground = Mat4::from_scale(Vec3::new(30.0, 0.05, 30.0));
+    instances.push(InstanceRaw {
+        model: ground.to_cols_array_2d(),
+        color: [0.45, 0.52, 0.56],
+        flags: 1,
+    });
+
+    // 5. Update and render
     state.renderer.update_instances(&instances);
     state.renderer.render_frame();
 }
