@@ -8,3 +8,5 @@ pub mod water;
 pub mod collision;
 pub mod integrator;
 pub mod genotype;
+pub mod phenotype;
+pub mod brain;
