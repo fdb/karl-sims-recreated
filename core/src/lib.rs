@@ -4,3 +4,4 @@ pub mod world;
 pub mod scene;
 pub mod spatial;
 pub mod featherstone;
+pub mod water;
