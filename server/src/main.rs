@@ -17,12 +17,9 @@ async fn main() {
     let num_workers = num_cpus::get().max(1);
     log::info!("Starting {num_workers} workers");
 
-    // Spawn worker tasks.
+    // Spawn workers on dedicated OS threads (CPU-bound fitness evaluation).
     for i in 0..num_workers {
-        let db = db.clone();
-        tokio::spawn(async move {
-            worker::run_worker(db, format!("worker-{i}")).await;
-        });
+        worker::spawn_worker(db.clone(), format!("worker-{i}"));
     }
 
     // Broadcast channel for live WebSocket updates.
