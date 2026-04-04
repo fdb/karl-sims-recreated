@@ -49,3 +49,43 @@ export async function getBestCreatures(
 export async function stopEvolution(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}/stop`, { method: "POST" });
 }
+
+export interface GenotypeInfo {
+  id: number;
+  num_nodes: number;
+  num_connections: number;
+  nodes: {
+    id: number;
+    dimensions: [number, number, number];
+    joint_type: string;
+    recursive_limit: number;
+    terminal_only: boolean;
+    brain: {
+      num_neurons: number;
+      num_effectors: number;
+      neurons: {
+        id: number;
+        func: string;
+        inputs: { source: string; weight: number }[];
+      }[];
+    };
+  }[];
+  connections: {
+    source: number;
+    target: number;
+    parent_face: string;
+    child_face: string;
+    scale: number;
+    reflection: boolean;
+  }[];
+}
+
+export async function getGenotypeInfo(id: number): Promise<GenotypeInfo> {
+  const res = await fetch(`${API_BASE}/api/genotypes/${id}`);
+  return res.json();
+}
+
+export async function getGenomeBytes(id: number): Promise<ArrayBuffer> {
+  const res = await fetch(`${API_BASE}/api/genotypes/${id}/genome`);
+  return res.arrayBuffer();
+}

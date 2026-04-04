@@ -1,4 +1,5 @@
 use axum::extract::{Path, State};
+use axum::response::IntoResponse;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +39,11 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/evolutions/{id}/stop",
             axum::routing::post(stop_evolution),
+        )
+        .route("/api/genotypes/{id}", axum::routing::get(get_genotype_info))
+        .route(
+            "/api/genotypes/{id}/genome",
+            axum::routing::get(get_genome_bytes),
         )
 }
 
@@ -113,4 +119,77 @@ async fn stop_evolution(
     let conn = state.db.lock().unwrap();
     db::stop_evolution(&conn, id);
     Json(serde_json::json!({"status": "stopped"}))
+}
+
+async fn get_genome_bytes(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let conn = state.db.lock().unwrap();
+    match db::get_genotype(&conn, id) {
+        Some(bytes) => (
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            bytes,
+        )
+            .into_response(),
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn get_genotype_info(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let conn = state.db.lock().unwrap();
+    match db::get_genotype(&conn, id) {
+        Some(bytes) => {
+            match bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes) {
+                Ok(genome) => {
+                    let info = serde_json::json!({
+                        "id": id,
+                        "num_nodes": genome.nodes.len(),
+                        "num_connections": genome.connections.len(),
+                        "nodes": genome.nodes.iter().enumerate().map(|(i, n)| {
+                            serde_json::json!({
+                                "id": i,
+                                "dimensions": [n.dimensions.x, n.dimensions.y, n.dimensions.z],
+                                "joint_type": format!("{:?}", n.joint_type),
+                                "recursive_limit": n.recursive_limit,
+                                "terminal_only": n.terminal_only,
+                                "brain": {
+                                    "num_neurons": n.brain.neurons.len(),
+                                    "num_effectors": n.brain.effectors.len(),
+                                    "neurons": n.brain.neurons.iter().enumerate().map(|(j, neuron)| {
+                                        serde_json::json!({
+                                            "id": j,
+                                            "func": format!("{:?}", neuron.func),
+                                            "inputs": neuron.inputs.iter().map(|(inp, w)| {
+                                                serde_json::json!({
+                                                    "source": format!("{:?}", inp),
+                                                    "weight": w,
+                                                })
+                                            }).collect::<Vec<_>>(),
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                }
+                            })
+                        }).collect::<Vec<_>>(),
+                        "connections": genome.connections.iter().map(|c| {
+                            serde_json::json!({
+                                "source": c.source,
+                                "target": c.target,
+                                "parent_face": format!("{:?}", c.parent_face),
+                                "child_face": format!("{:?}", c.child_face),
+                                "scale": c.scale,
+                                "reflection": c.reflection,
+                            })
+                        }).collect::<Vec<_>>(),
+                    });
+                    Json(info).into_response()
+                }
+                Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            }
+        }
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
 }

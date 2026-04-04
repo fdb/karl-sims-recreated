@@ -78,13 +78,15 @@ export default function App() {
           <CreatureDetail
             evoId={Number(route.params.evoId)}
             creatureId={Number(route.params.creatureId)}
+            canvasVisible={route.path === "creature"}
+            onShowCanvas={() => {}}
           />
         )}
         {route.path === "viewer" && <Viewer ready={ready} />}
       </main>
 
       {/* Canvas is always in DOM — wgpu renderer is bound to it */}
-      <div style={{ display: route.path === "viewer" ? "block" : "none" }}>
+      <div style={{ display: (route.path === "viewer" || route.path === "creature") ? "block" : "none" }}>
         <canvas ref={canvasRef} id="sim-canvas" width={960} height={640} />
       </div>
     </div>

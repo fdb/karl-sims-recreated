@@ -29,6 +29,7 @@ enum SceneId {
     RandomCreature,
     MiniEvolution,
     Following,
+    LoadedCreature,
 }
 
 struct AppState {
@@ -113,6 +114,7 @@ fn build_world(scene_id: SceneId) -> World {
         SceneId::RandomCreature => World::new(), // handled via Creature path
         SceneId::MiniEvolution => World::new(),   // handled via Creature path
         SceneId::Following => World::new(),       // handled via Creature path
+        SceneId::LoadedCreature => World::new(),  // handled via Creature path
     }
 }
 
@@ -198,6 +200,23 @@ pub fn set_paused(paused: bool) {
 }
 
 #[wasm_bindgen]
+pub fn load_creature_from_bytes(genome_bytes: &[u8]) -> Result<(), JsValue> {
+    let genome: karl_sims_core::genotype::GenomeGraph = bincode::deserialize(genome_bytes)
+        .map_err(|e| JsValue::from_str(&format!("Failed to deserialize genome: {e}")))?;
+
+    let creature = karl_sims_core::creature::Creature::from_genome(genome);
+
+    APP.with(|a| {
+        if let Some(ref mut state) = *a.borrow_mut() {
+            state.creature = Some(creature);
+            state.scene_id = SceneId::LoadedCreature;
+        }
+    });
+
+    Ok(())
+}
+
+#[wasm_bindgen]
 pub fn reset_scene() {
     APP.with(|a| {
         if let Some(ref mut state) = *a.borrow_mut() {
@@ -280,9 +299,10 @@ fn tick(state: &mut AppState, _dt: f64) {
                 SceneId::SphericalJoint => scene::spherical_joint_torque(&mut state.world),
                 SceneId::TripleChain => scene::triple_chain_torque(&mut state.world),
                 SceneId::SwimmingStarfish => scene::swimming_starfish_torques(&mut state.world),
-                SceneId::RandomCreature => {} // handled above
-                SceneId::MiniEvolution => {} // handled via creature path
-                SceneId::Following => {}     // handled via creature path
+                SceneId::RandomCreature => {}   // handled above
+                SceneId::MiniEvolution => {}   // handled via creature path
+                SceneId::Following => {}       // handled via creature path
+                SceneId::LoadedCreature => {}  // handled via creature path
             }
             state.world.step(1.0 / 60.0);
         }

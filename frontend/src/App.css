@@ -244,3 +244,39 @@ a.evo-item {
   text-decoration: none;
   color: inherit;
 }
+
+.creature-detail { width: 100%; }
+
+.fitness-score {
+  font-size: 1.3rem;
+  color: #4caf50;
+  margin-bottom: 16px;
+}
+
+.genome-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.genome-panel {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.genome-panel h3 {
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: #b0c4ce;
+}
+
+.morph-graph, .brain-graph {
+  width: 100%;
+  height: auto;
+}
+
+.error { color: #d32f2f; }
