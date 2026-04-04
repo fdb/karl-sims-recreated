@@ -43,7 +43,12 @@ async fn main() {
         .route("/api/live", ws::ws_route())
         .with_state(state)
         .layer(cors)
-        .fallback_service(tower_http::services::ServeDir::new("frontend/dist"));
+        .fallback_service(
+            tower_http::services::ServeDir::new("frontend/dist")
+                .fallback(tower_http::services::ServeFile::new(
+                    "frontend/dist/index.html",
+                )),
+        );
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await

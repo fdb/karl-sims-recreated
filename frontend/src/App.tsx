@@ -1,29 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { initWasm, create_renderer, set_scene, set_paused, reset_scene } from "./wasm";
-import Dashboard from "./pages/Dashboard";
+import { initWasm, create_renderer } from "./wasm";
+import { useRoute } from "./hooks/useRoute";
+import { navigate } from "./router";
+import EvolutionList from "./pages/EvolutionList";
+import EvolutionDetail from "./pages/EvolutionDetail";
+import CreatureDetail from "./pages/CreatureDetail";
+import Viewer from "./pages/Viewer";
 import "./App.css";
 
-type Tab = "viewer" | "dashboard";
-
-const SCENES = [
-  { id: "starfish", label: "Starfish (4 flippers)" },
-  { id: "hinged_pair", label: "Hinged Pair" },
-  { id: "triple_chain", label: "Triple Chain" },
-  { id: "universal", label: "Universal Joint (2-DOF)" },
-  { id: "spherical", label: "Spherical Joint (3-DOF)" },
-  { id: "swimming_starfish", label: "Swimming Starfish (water)" },
-  { id: "single_box", label: "Single Box" },
-  { id: "random_creature", label: "Random Creature" },
-  { id: "following", label: "Following (light target)" },
-  { id: "mini_evolution", label: "Mini Evolution (in-browser)" },
-];
-
 export default function App() {
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const route = useRoute();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const initedRef = useRef(false);
-  const [currentScene, setCurrentScene] = useState("starfish");
-  const [paused, setPaused] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -38,68 +26,66 @@ export default function App() {
     })();
   }, []);
 
-  const handleSceneChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const scene = e.target.value;
-    setCurrentScene(scene);
-    set_scene(scene);
-    setPaused(false);
-    set_paused(false);
-  };
-
-  const handlePlayPause = () => {
-    const next = !paused;
-    setPaused(next);
-    set_paused(next);
-  };
-
-  const handleReset = () => {
-    reset_scene();
-    setPaused(false);
-    set_paused(false);
-  };
-
   return (
     <div className="app">
-      <h1>Evolving Virtual Creatures</h1>
-      <div className="tabs">
-        <button
-          className={tab === "dashboard" ? "active" : ""}
-          onClick={() => setTab("dashboard")}
+      <nav className="nav">
+        <a
+          href="/"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate("/");
+          }}
+          className="nav-brand"
         >
-          Dashboard
-        </button>
-        <button
-          className={tab === "viewer" ? "active" : ""}
-          onClick={() => setTab("viewer")}
-        >
-          3D Viewer
-        </button>
-      </div>
-
-      {tab === "dashboard" && <Dashboard />}
-
-      <div style={{ display: tab === "viewer" ? "block" : "none" }}>
-        <div className="controls">
-          <select
-            value={currentScene}
-            onChange={handleSceneChange}
-            disabled={!ready}
+          Evolving Virtual Creatures
+        </a>
+        <div className="nav-links">
+          <a
+            href="/"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/");
+            }}
+            className={
+              route.path === "home" ||
+              route.path === "evolution" ||
+              route.path === "creature"
+                ? "active"
+                : ""
+            }
           >
-            {SCENES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <button onClick={handlePlayPause} disabled={!ready}>
-            {paused ? "Play" : "Pause"}
-          </button>
-          <button onClick={handleReset} disabled={!ready}>
-            Reset
-          </button>
+            Dashboard
+          </a>
+          <a
+            href="/viewer"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/viewer");
+            }}
+            className={route.path === "viewer" ? "active" : ""}
+          >
+            Viewer
+          </a>
         </div>
+      </nav>
+
+      <main className="main">
+        {route.path === "home" && <EvolutionList />}
+        {route.path === "evolution" && (
+          <EvolutionDetail evoId={Number(route.params.evoId)} />
+        )}
+        {route.path === "creature" && (
+          <CreatureDetail
+            evoId={Number(route.params.evoId)}
+            creatureId={Number(route.params.creatureId)}
+          />
+        )}
+        {route.path === "viewer" && <Viewer ready={ready} />}
+      </main>
+
+      {/* Canvas is always in DOM — wgpu renderer is bound to it */}
+      <div style={{ display: route.path === "viewer" ? "block" : "none" }}>
         <canvas ref={canvasRef} id="sim-canvas" width={960} height={640} />
-        <p className="hint">Drag to orbit. Scroll to zoom.</p>
       </div>
     </div>
   );
