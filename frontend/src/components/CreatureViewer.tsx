@@ -150,9 +150,28 @@ export default function CreatureViewer({ genomeBytes }: Props) {
 
       // Animation loop
       let animId: number;
+      let frameCount = 0;
       const animate = () => {
         animId = requestAnimationFrame(animate);
-        applyTransforms(sim_step(handle), meshes);
+        const transforms = sim_step(handle);
+
+        // Debug: log first 5 frames
+        if (frameCount < 5) {
+          const p0 = `(${transforms[0].toFixed(3)}, ${transforms[1].toFixed(3)}, ${transforms[2].toFixed(3)})`;
+          const hasNaN = transforms.some((v) => !isFinite(v));
+          console.log(`CreatureViewer frame ${frameCount}: body[0]=${p0} NaN=${hasNaN}`);
+          frameCount++;
+        }
+
+        // NaN guard: skip update if physics has diverged
+        if (transforms.some((v) => !isFinite(v))) {
+          console.warn("CreatureViewer: NaN/Inf in transforms, freezing on last valid frame");
+          controls.update();
+          renderer.render(scene, camera);
+          return;
+        }
+
+        applyTransforms(transforms, meshes);
         controls.update();
         renderer.render(scene, camera);
       };

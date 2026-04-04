@@ -16,12 +16,15 @@ pub struct SimHandle {
 }
 
 /// Initialize a simulation from serialized genome bytes.
-/// Returns a SimHandle on success.
+/// Water drag is enabled so the sim is stable — creatures are evolved in water.
 #[wasm_bindgen]
 pub fn sim_init(genome_bytes: &[u8]) -> Result<SimHandle, JsValue> {
     let genome: GenomeGraph = bincode::deserialize(genome_bytes)
         .map_err(|e| JsValue::from_str(&format!("Failed to deserialize genome: {e}")))?;
-    let creature = Creature::from_genome(genome);
+    let mut creature = Creature::from_genome(genome);
+    creature.world.water_enabled = true;
+    creature.world.water_viscosity = 2.0;
+    creature.world.gravity = glam::DVec3::ZERO;
     Ok(SimHandle { creature })
 }
 
@@ -53,7 +56,10 @@ pub fn sim_init_random(seed: u64) -> SimHandle {
     use karl_sims_core::rand::SeedableRng;
     let mut rng = karl_sims_core::rand_chacha::ChaCha8Rng::seed_from_u64(seed);
     let genome = karl_sims_core::genotype::GenomeGraph::random(&mut rng);
-    let creature = Creature::from_genome(genome);
+    let mut creature = Creature::from_genome(genome);
+    creature.world.water_enabled = true;
+    creature.world.water_viscosity = 2.0;
+    creature.world.gravity = glam::DVec3::ZERO;
     SimHandle { creature }
 }
 
