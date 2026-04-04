@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   listEvolutions,
-  createEvolution,
   stopEvolution,
   pauseEvolution,
   resumeEvolution,
@@ -9,10 +8,11 @@ import {
 } from "../api";
 import { navigate } from "../router";
 import StatusBadge from "../components/StatusBadge";
+import CreateEvolutionForm from "../components/CreateEvolutionForm";
 
 export default function EvolutionList() {
   const [evolutions, setEvolutions] = useState<Evolution[]>([]);
-  const [popSize, setPopSize] = useState(50);
+  const [showForm, setShowForm] = useState(false);
 
   const refresh = useCallback(async () => {
     const evos = await listEvolutions();
@@ -24,11 +24,6 @@ export default function EvolutionList() {
     const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
   }, [refresh]);
-
-  const handleCreate = async () => {
-    await createEvolution(popSize);
-    refresh();
-  };
 
   const handleStop = async (id: number) => {
     await stopEvolution(id);
@@ -49,24 +44,25 @@ export default function EvolutionList() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Evolution Runs</h1>
-        <div className="flex items-center gap-3">
-          <label className="text-sm text-text-secondary">Population:</label>
-          <input
-            type="number"
-            value={popSize}
-            onChange={(e) => setPopSize(Number(e.target.value))}
-            min={10}
-            max={500}
-            className="w-20 px-3 py-1.5 bg-bg-surface border border-border rounded-md text-sm text-text-primary focus:outline-none focus:border-accent"
-          />
+        {!showForm && (
           <button
-            onClick={handleCreate}
+            onClick={() => setShowForm(true)}
             className="px-4 py-1.5 bg-accent text-white rounded-md text-sm font-medium hover:bg-accent-hover transition-colors"
           >
             New Evolution
           </button>
-        </div>
+        )}
       </div>
+
+      {showForm && (
+        <CreateEvolutionForm
+          onCreated={() => {
+            setShowForm(false);
+            refresh();
+          }}
+          onCancel={() => setShowForm(false)}
+        />
+      )}
 
       <div className="space-y-2">
         {evolutions.map((evo) => (
@@ -136,7 +132,7 @@ export default function EvolutionList() {
             </div>
           </a>
         ))}
-        {evolutions.length === 0 && (
+        {evolutions.length === 0 && !showForm && (
           <p className="text-text-muted italic py-8 text-center">
             No evolutions yet. Create one!
           </p>

@@ -1,9 +1,19 @@
 const API_BASE = "http://localhost:3000";
 
+export interface EvolutionConfig {
+  population_size: number;
+  max_generations: number;
+  goal: "SwimmingSpeed" | "LightFollowing";
+  environment: "Water" | "Land";
+  sim_duration: number;
+  max_parts: number;
+}
+
 export interface Evolution {
   id: number;
   status: string;
   generation: number;
+  config?: EvolutionConfig;
 }
 
 export interface CreatureInfo {
@@ -23,13 +33,22 @@ export async function listEvolutions(): Promise<Evolution[]> {
   return res.json();
 }
 
+export interface CreateEvolutionParams {
+  population_size: number;
+  generations: number;
+  goal: string;
+  environment: string;
+  sim_duration: number;
+  max_parts: number;
+}
+
 export async function createEvolution(
-  populationSize: number = 50,
+  params: CreateEvolutionParams,
 ): Promise<{ id: number }> {
   const res = await fetch(`${API_BASE}/api/evolutions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ population_size: populationSize }),
+    body: JSON.stringify(params),
   });
   return res.json();
 }

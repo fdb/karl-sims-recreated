@@ -113,9 +113,27 @@ export default function EvolutionDetail({ evoId }: Props) {
       </div>
 
       {evolution && (
-        <p className="text-text-secondary mb-6">
-          Generation {evolution.generation}
-        </p>
+        <div className="flex gap-6 text-sm text-text-secondary mb-6">
+          <span>Generation {evolution.generation}</span>
+          {evolution.config && (
+            <>
+              <span>·</span>
+              <span>
+                {evolution.config.goal === "SwimmingSpeed"
+                  ? "Swimming Speed"
+                  : "Light Following"}
+              </span>
+              <span>·</span>
+              <span>
+                {evolution.config.environment === "Water" ? "Water" : "Land"}
+              </span>
+              <span>·</span>
+              <span>Pop {evolution.config.population_size}</span>
+              <span>·</span>
+              <span>{evolution.config.sim_duration}s sim</span>
+            </>
+          )}
+        </div>
       )}
 
       {/* Two-column layout: chart left, creatures right */}
