@@ -12,7 +12,8 @@ export function useEvolutionUpdates(): GenerationStats[] {
     function connect() {
       if (closed) return;
       try {
-        ws = new WebSocket("ws://localhost:3000/api/live");
+        const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(`${wsProto}//${window.location.host}/api/live`);
 
         ws.onmessage = (event) => {
           try {
