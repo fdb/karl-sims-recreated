@@ -52,7 +52,9 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/api/evolutions/{id}",
-            axum::routing::get(get_evolution).patch(patch_evolution),
+            axum::routing::get(get_evolution)
+                .patch(patch_evolution)
+                .delete(delete_evolution_handler),
         )
         .route("/api/evolutions/{id}/best", axum::routing::get(get_best))
         .route(
@@ -164,6 +166,17 @@ async fn patch_evolution(
     let name = req.name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     db::set_evolution_name(&conn, id, name.as_deref());
     Json(serde_json::json!({"id": id, "name": name}))
+}
+
+async fn delete_evolution_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let conn = state.db.lock().unwrap();
+    // Stop first so the coordinator task exits on its next status check.
+    db::stop_evolution(&conn, id);
+    db::delete_evolution(&conn, id);
+    axum::http::StatusCode::NO_CONTENT
 }
 
 async fn get_best(

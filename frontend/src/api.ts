@@ -94,6 +94,10 @@ export async function resumeEvolution(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}/resume`, { method: "POST" });
 }
 
+export async function deleteEvolution(id: number): Promise<void> {
+  await fetch(`${API_BASE}/api/evolutions/${id}`, { method: "DELETE" });
+}
+
 export async function updateEvolutionName(id: number, name: string): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}`, {
     method: "PATCH",

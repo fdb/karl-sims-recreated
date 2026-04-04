@@ -328,6 +328,17 @@ pub fn pause_evolution(conn: &Connection, evo_id: i64) {
     .expect("Failed to pause evolution");
 }
 
+/// Delete an evolution and all its genotypes/tasks from the database.
+/// Caller should set status to 'stopped' first so the coordinator exits.
+pub fn delete_evolution(conn: &Connection, evo_id: i64) {
+    conn.execute("DELETE FROM tasks WHERE evolution_id=?1", params![evo_id])
+        .expect("Failed to delete tasks");
+    conn.execute("DELETE FROM genotypes WHERE evolution_id=?1", params![evo_id])
+        .expect("Failed to delete genotypes");
+    conn.execute("DELETE FROM evolutions WHERE id=?1", params![evo_id])
+        .expect("Failed to delete evolution");
+}
+
 /// Resume a paused evolution.
 pub fn resume_evolution(conn: &Connection, evo_id: i64) {
     conn.execute(

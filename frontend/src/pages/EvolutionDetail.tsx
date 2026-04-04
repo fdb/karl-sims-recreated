@@ -7,6 +7,7 @@ import {
   getBestCreatures,
   getEvolutionStats,
   updateEvolutionName,
+  deleteEvolution,
   type Evolution,
   type CreatureInfo,
   type GenerationStats,
@@ -61,6 +62,12 @@ export default function EvolutionDetail({ evoId }: Props) {
   const handleStop = async () => {
     await stopEvolution(evoId);
     refresh();
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete this evolution and all its creatures? This cannot be undone.")) return;
+    await deleteEvolution(evoId);
+    navigate("/");
   };
 
   const handlePause = async () => {
@@ -178,7 +185,7 @@ export default function EvolutionDetail({ evoId }: Props) {
       )}
 
       {/* Two-column layout: chart left, creatures right */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
         <div className="lg:col-span-3">
           <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
             <h2 className="text-sm font-medium text-text-secondary mb-3">
@@ -217,6 +224,15 @@ export default function EvolutionDetail({ evoId }: Props) {
             </div>
           </div>
         </div>
+      </div>
+      {/* Danger zone */}
+      <div className="border-t border-border-subtle pt-6 mt-2">
+        <button
+          onClick={handleDelete}
+          className="px-4 py-1.5 text-sm border border-danger text-danger rounded-md hover:bg-danger/10 transition-colors"
+        >
+          Delete Evolution
+        </button>
       </div>
     </div>
   );
