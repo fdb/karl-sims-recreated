@@ -1,0 +1,4 @@
+[     336ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=c4ee84c5:20100
+[    1476ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5174/favicon.ico:0
+[    1481ms] [INFO] karl-sims WASM module loaded @ http://localhost:5174/@fs/Users/fdb/Experiments/karl-sims-recreated/web/pkg/karl_sims_web.js:348
+[    1643ms] [LOG] Renderer created @ http://localhost:5174/src/App.tsx:42
