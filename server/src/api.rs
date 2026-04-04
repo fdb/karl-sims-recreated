@@ -32,6 +32,8 @@ struct CreateEvolutionRequest {
     environment: Option<String>,
     sim_duration: Option<f64>,
     max_parts: Option<usize>,
+    gravity: Option<f64>,
+    water_viscosity: Option<f64>,
 }
 
 pub fn routes() -> Router<AppState> {
@@ -96,6 +98,8 @@ async fn create_evolution(
         environment: env,
         sim_duration: req.sim_duration.unwrap_or(10.0),
         max_parts: req.max_parts.unwrap_or(20),
+        gravity: req.gravity.unwrap_or(9.81),
+        water_viscosity: req.water_viscosity.unwrap_or(2.0),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {

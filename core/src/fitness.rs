@@ -31,7 +31,16 @@ pub struct EvolutionParams {
     pub environment: Environment,
     pub sim_duration: f64,
     pub max_parts: usize,
+    /// Gravity strength in m/s² (only used for Land environment). Default: 9.81
+    #[serde(default = "default_gravity")]
+    pub gravity: f64,
+    /// Water viscosity coefficient (only used for Water environment). Default: 2.0
+    #[serde(default = "default_viscosity")]
+    pub water_viscosity: f64,
 }
+
+fn default_gravity() -> f64 { 9.81 }
+fn default_viscosity() -> f64 { 2.0 }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
@@ -42,6 +51,8 @@ impl Default for EvolutionParams {
             environment: Environment::Water,
             sim_duration: 10.0,
             max_parts: 20,
+            gravity: 9.81,
+            water_viscosity: 2.0,
         }
     }
 }
@@ -54,11 +65,12 @@ pub fn evaluate_fitness(genome: &GenomeGraph, params: &EvolutionParams) -> Fitne
     match params.environment {
         Environment::Water => {
             creature.world.water_enabled = true;
+            creature.world.water_viscosity = params.water_viscosity;
             creature.world.gravity = DVec3::ZERO;
         }
         Environment::Land => {
             creature.world.water_enabled = false;
-            creature.world.gravity = DVec3::new(0.0, -9.81, 0.0);
+            creature.world.gravity = DVec3::new(0.0, -params.gravity, 0.0);
             creature.world.collisions_enabled = true;
             creature.world.ground_enabled = true;
             // Position root above ground

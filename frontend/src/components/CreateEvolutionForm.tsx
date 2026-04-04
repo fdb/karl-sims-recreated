@@ -13,6 +13,8 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [maxGen, setMaxGen] = useState(100);
   const [simDuration, setSimDuration] = useState(10);
   const [maxParts, setMaxParts] = useState(20);
+  const [gravity, setGravity] = useState(9.81);
+  const [viscosity, setViscosity] = useState(2.0);
   const [creating, setCreating] = useState(false);
 
   const handleSubmit = async () => {
@@ -24,6 +26,8 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       environment,
       sim_duration: simDuration,
       max_parts: maxParts,
+      gravity: environment === "land" ? gravity : undefined,
+      water_viscosity: environment === "water" ? viscosity : undefined,
     });
     setCreating(false);
     onCreated();
@@ -126,6 +130,44 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             className={inputClass}
           />
         </div>
+
+        {/* Gravity (land only) */}
+        {environment === "land" && (
+          <div>
+            <label className={labelClass}>Gravity (m/s²)</label>
+            <input
+              type="number"
+              value={gravity}
+              onChange={(e) => setGravity(Number(e.target.value))}
+              min={0}
+              max={30}
+              step={0.1}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Earth: 9.81, Moon: 1.62, Mars: 3.72
+            </p>
+          </div>
+        )}
+
+        {/* Water Viscosity (water only) */}
+        {environment === "water" && (
+          <div>
+            <label className={labelClass}>Water Viscosity</label>
+            <input
+              type="number"
+              value={viscosity}
+              onChange={(e) => setViscosity(Number(e.target.value))}
+              min={0.1}
+              max={10}
+              step={0.1}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Higher = thicker fluid. Default: 2.0
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-3 mt-6">

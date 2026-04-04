@@ -40,6 +40,8 @@ export interface CreateEvolutionParams {
   environment: string;
   sim_duration: number;
   max_parts: number;
+  gravity?: number;
+  water_viscosity?: number;
 }
 
 export async function createEvolution(
