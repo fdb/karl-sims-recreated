@@ -50,6 +50,14 @@ pub fn init_db(path: &str) -> DbPool {
     )
     .expect("Failed to create tables");
 
+    // Reset any tasks stuck in 'running' state from a previous crash.
+    // These would never be picked up otherwise.
+    conn.execute(
+        "UPDATE tasks SET status='pending', worker_id=NULL, started_at=NULL WHERE status='running'",
+        [],
+    )
+    .ok();
+
     Arc::new(Mutex::new(conn))
 }
 
@@ -77,6 +85,29 @@ pub fn insert_genotype(
     )
     .expect("Failed to insert genotype");
     conn.last_insert_rowid()
+}
+
+/// Insert a genotype with a known fitness (for survivors carried forward).
+pub fn insert_genotype_with_fitness(
+    conn: &Connection,
+    evo_id: i64,
+    generation: i64,
+    genome_bytes: &[u8],
+    fitness: f64,
+) -> i64 {
+    conn.execute(
+        "INSERT INTO genotypes (evolution_id, generation, genome_bytes, fitness) VALUES (?1, ?2, ?3, ?4)",
+        params![evo_id, generation, genome_bytes, fitness],
+    )
+    .expect("Failed to insert genotype with fitness");
+    let gid = conn.last_insert_rowid();
+    // Also create a completed task so pending_task_count doesn't block
+    conn.execute(
+        "INSERT INTO tasks (evolution_id, genotype_id, status, fitness, completed_at) VALUES (?1, ?2, 'completed', ?3, datetime('now'))",
+        params![evo_id, gid, fitness],
+    )
+    .expect("Failed to create completed task for survivor");
+    gid
 }
 
 /// Create a fitness-evaluation task for a genotype.

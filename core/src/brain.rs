@@ -201,8 +201,8 @@ impl BrainInstance {
                 .iter()
                 .map(|(inp, weight)| {
                     let val = match inp {
-                        RemappedInput::Neuron(idx) => self.prev_outputs[*idx],
-                        RemappedInput::Sensor(idx) => self.sensors[*idx],
+                        RemappedInput::Neuron(idx) => self.prev_outputs.get(*idx).copied().unwrap_or(0.0),
+                        RemappedInput::Sensor(idx) => self.sensors.get(*idx).copied().unwrap_or(0.0),
                         RemappedInput::Constant(v) => *v,
                     };
                     val * weight
@@ -252,8 +252,8 @@ impl BrainInstance {
 
         for eff in &self.effectors {
             let val = match &eff.input {
-                RemappedInput::Neuron(idx) => self.outputs[*idx],
-                RemappedInput::Sensor(idx) => self.sensors[*idx],
+                RemappedInput::Neuron(idx) => self.outputs.get(*idx).copied().unwrap_or(0.0),
+                RemappedInput::Sensor(idx) => self.sensors.get(*idx).copied().unwrap_or(0.0),
                 RemappedInput::Constant(v) => *v,
             };
             let torque = (val * eff.weight).clamp(-eff.max_torque, eff.max_torque);

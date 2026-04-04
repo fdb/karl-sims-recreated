@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 
 use crate::db::{
     create_task, get_evolution_status, get_evolution_full, get_genotype, get_generation_fitnesses,
-    insert_genotype, pending_task_count, update_evolution, DbPool,
+    insert_genotype, insert_genotype_with_fitness, pending_task_count, update_evolution, DbPool,
 };
 
 /// Run a full evolution loop, persisting every generation to the database.
@@ -122,7 +122,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         }
 
         // Sort by fitness descending.
-        individuals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        individuals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let best = individuals.first().map(|(_, f)| *f).unwrap_or(0.0);
         let avg = individuals.iter().map(|(_, f)| f).sum::<f64>()
@@ -189,12 +189,11 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             update_evolution(&conn, evo_id, "running", next_gen as i64);
         }
 
-        // Keep survivors (they get re-evaluated).
-        for genome in &survivors {
+        // Keep survivors with their existing fitness (no re-evaluation needed).
+        for (genome, fitness) in survivors.iter().zip(survivor_fitnesses.iter()) {
             let bytes = bincode::serialize(genome).unwrap();
             let conn = db.lock().unwrap();
-            let gid = insert_genotype(&conn, evo_id, next_gen as i64, &bytes, None);
-            create_task(&conn, evo_id, gid);
+            insert_genotype_with_fitness(&conn, evo_id, next_gen as i64, &bytes, *fitness);
             offspring_count += 1;
         }
 

@@ -90,12 +90,11 @@ impl Population {
     pub fn evolve_generation<R: Rng>(&mut self, rng: &mut R) {
         self.evaluate_all();
 
-        // Sort by fitness descending
+        // Sort by fitness descending (NaN-safe)
         self.individuals.sort_by(|a, b| {
-            b.fitness
-                .unwrap_or(0.0)
-                .partial_cmp(&a.fitness.unwrap_or(0.0))
-                .unwrap()
+            let fa = a.fitness.unwrap_or(0.0);
+            let fb = b.fitness.unwrap_or(0.0);
+            fb.partial_cmp(&fa).unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Record stats
@@ -179,10 +178,9 @@ impl Population {
 
     pub fn best(&self) -> Option<&Individual> {
         self.individuals.iter().max_by(|a, b| {
-            a.fitness
-                .unwrap_or(0.0)
-                .partial_cmp(&b.fitness.unwrap_or(0.0))
-                .unwrap()
+            let fa = a.fitness.unwrap_or(0.0);
+            let fb = b.fitness.unwrap_or(0.0);
+            fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
         })
     }
 }

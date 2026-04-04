@@ -96,14 +96,14 @@ async fn create_evolution(
         _ => Environment::Water,
     };
     let params = EvolutionParams {
-        population_size: req.population_size.unwrap_or(50),
-        max_generations: req.generations.unwrap_or(100),
+        population_size: req.population_size.unwrap_or(50).clamp(5, 1000),
+        max_generations: req.generations.unwrap_or(100).clamp(1, 10000),
         goal,
         environment: env,
-        sim_duration: req.sim_duration.unwrap_or(10.0),
-        max_parts: req.max_parts.unwrap_or(20),
-        gravity: req.gravity.unwrap_or(9.81),
-        water_viscosity: req.water_viscosity.unwrap_or(2.0),
+        sim_duration: req.sim_duration.unwrap_or(10.0).clamp(1.0, 60.0),
+        max_parts: req.max_parts.unwrap_or(20).clamp(2, 50),
+        gravity: req.gravity.unwrap_or(9.81).clamp(0.0, 30.0),
+        water_viscosity: req.water_viscosity.unwrap_or(2.0).clamp(0.1, 10.0),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {

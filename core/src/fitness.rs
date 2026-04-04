@@ -160,8 +160,13 @@ fn evaluate_following(genome: &GenomeGraph, params: &EvolutionParams) -> Fitness
             }
             Environment::Land => {
                 creature.world.water_enabled = false;
-                creature.world.gravity = DVec3::new(0.0, -9.81, 0.0);
+                creature.world.gravity = DVec3::new(0.0, -params.gravity, 0.0);
                 creature.world.collisions_enabled = true;
+                creature.world.ground_enabled = true;
+                creature.world.set_root_transform(
+                    glam::DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)),
+                );
+                creature.world.forward_kinematics();
             }
         }
 
