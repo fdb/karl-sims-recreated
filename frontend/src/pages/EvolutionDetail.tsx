@@ -17,6 +17,16 @@ import { navigate } from "../router";
 import FitnessChart from "../components/FitnessChart";
 import StatusBadge from "../components/StatusBadge";
 
+function formatFitness(v: number): string {
+  if (!isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs === 0) return "0";
+  if (abs >= 1e6) return v.toExponential(2);
+  if (abs >= 1) return v.toFixed(2);
+  if (abs >= 0.01) return v.toFixed(4);
+  return v.toExponential(2);
+}
+
 interface Props {
   evoId: number;
 }
@@ -168,7 +178,9 @@ export default function EvolutionDetail({ evoId }: Props) {
               <span>·</span>
               <span>
                 {evolution.config.goal === "SwimmingSpeed"
-                  ? "Swimming Speed"
+                  ? evolution.config.environment === "Land"
+                    ? "Locomotion Speed"
+                    : "Swimming Speed"
                   : "Light Following"}
               </span>
               <span>·</span>
@@ -212,7 +224,7 @@ export default function EvolutionDetail({ evoId }: Props) {
                 >
                   <span className="text-sm font-mono">#{c.id}</span>
                   <span className="text-sm text-text-secondary">
-                    {c.fitness.toFixed(4)}
+                    {formatFitness(c.fitness)}
                   </span>
                 </a>
               ))}

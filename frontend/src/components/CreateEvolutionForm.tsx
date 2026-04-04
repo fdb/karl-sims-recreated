@@ -57,24 +57,6 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
           />
         </div>
 
-        {/* Goal */}
-        <div>
-          <label className={labelClass}>Fitness Goal</label>
-          <select
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            className={inputClass}
-          >
-            <option value="swimming_speed">Swimming Speed</option>
-            <option value="light_following">Light Following</option>
-          </select>
-          <p className="text-xs text-text-muted mt-1">
-            {goal === "swimming_speed"
-              ? "Evolve creatures that swim the fastest in a straight line."
-              : "Evolve creatures that follow a moving light source."}
-          </p>
-        </div>
-
         {/* Environment */}
         <div>
           <label className={labelClass}>Environment</label>
@@ -90,6 +72,28 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             {environment === "water"
               ? "Zero gravity, per-face viscous water drag."
               : "Gravity at 9.81 m/s², ground plane with collisions."}
+          </p>
+        </div>
+
+        {/* Goal */}
+        <div>
+          <label className={labelClass}>Fitness Goal</label>
+          <select
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            className={inputClass}
+          >
+            <option value="swimming_speed">
+              {environment === "land" ? "Locomotion Speed" : "Swimming Speed"}
+            </option>
+            <option value="light_following">Light Following</option>
+          </select>
+          <p className="text-xs text-text-muted mt-1">
+            {goal === "swimming_speed"
+              ? environment === "land"
+                ? "Evolve creatures that move the fastest across the ground."
+                : "Evolve creatures that swim the fastest in a straight line."
+              : "Evolve creatures that follow a moving light source."}
           </p>
         </div>
 

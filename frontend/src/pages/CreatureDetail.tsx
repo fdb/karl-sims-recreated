@@ -12,6 +12,16 @@ import MorphologyGraph from "../components/MorphologyGraph";
 import BrainGraph from "../components/BrainGraph";
 import CreatureViewer from "../components/CreatureViewer";
 
+function formatFitness(v: number): string {
+  if (!isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs === 0) return "0";
+  if (abs >= 1e6) return v.toExponential(2);
+  if (abs >= 1) return v.toFixed(2);
+  if (abs >= 0.01) return v.toFixed(4);
+  return v.toExponential(2);
+}
+
 interface Props {
   evoId: number;
   creatureId: number;
@@ -22,6 +32,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
   const [creature, setCreature] = useState<CreatureInfo | null>(null);
   const [genomeBytes, setGenomeBytes] = useState<Uint8Array | null>(null);
   const [environment, setEnvironment] = useState<"Water" | "Land">("Water");
+  const [goal, setGoal] = useState<"SwimmingSpeed" | "LightFollowing">("SwimmingSpeed");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +51,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
         const c = creatures.find((c) => c.id === creatureId);
         if (c) setCreature(c);
         if (evo.config?.environment) setEnvironment(evo.config.environment);
+        if (evo.config?.goal) setGoal(evo.config.goal);
         setInfo(genoInfo);
         setGenomeBytes(new Uint8Array(bytes));
       } catch (e) {
@@ -83,7 +95,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
         <h1 className="text-2xl font-semibold">Creature #{creatureId}</h1>
         {creature && (
           <span className="text-success text-lg font-mono">
-            Fitness: {creature.fitness.toFixed(4)}
+            Fitness: {formatFitness(creature.fitness)}
           </span>
         )}
       </div>
@@ -99,7 +111,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
                 <p className="text-text-muted text-sm">Loading creature...</p>
               </div>
             )}
-            {genomeBytes && <CreatureViewer genomeBytes={genomeBytes} environment={environment} />}
+            {genomeBytes && <CreatureViewer genomeBytes={genomeBytes} environment={environment} goal={goal} />}
           </div>
         </div>
         <div className="lg:col-span-1 space-y-4 lg:overflow-y-auto lg:max-h-[calc(100vh-200px)]">

@@ -97,6 +97,9 @@ pub fn evaluate_fitness(genome: &GenomeGraph, params: &EvolutionParams) -> Fitne
     }
 }
 
+/// Maximum plausible displacement in one simulation — anything beyond this is a physics blowup.
+const MAX_PLAUSIBLE_DISTANCE: f64 = 1000.0;
+
 fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> FitnessResult {
     let dt = 1.0 / 60.0;
     let total_steps = (params.sim_duration / dt).round() as usize;
@@ -108,6 +111,17 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
         creature.step(dt);
         let pos = creature.world.transforms[creature.world.root].translation;
         let disp = (pos - initial_pos).length();
+
+        // Physics divergence check: NaN or implausible distance → zero fitness.
+        if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE {
+            return FitnessResult {
+                score: 0.0,
+                distance: 0.0,
+                max_displacement: 0.0,
+                terminated_early: true,
+            };
+        }
+
         max_displacement = max_displacement.max(disp);
         if step + 1 == early_check_step && disp < 0.01 {
             return FitnessResult {
@@ -183,6 +197,18 @@ fn evaluate_following(genome: &GenomeGraph, params: &EvolutionParams) -> Fitness
             }
             creature.step(dt);
             let pos = creature.world.transforms[creature.world.root].translation;
+
+            // Physics divergence check.
+            let disp = (pos - DVec3::ZERO).length();
+            if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE {
+                return FitnessResult {
+                    score: 0.0,
+                    distance: 0.0,
+                    max_displacement: 0.0,
+                    terminated_early: true,
+                };
+            }
+
             let movement = pos - prev_pos;
             let to_light = (creature.world.light_position - pos).normalize_or_zero();
             let speed = movement.dot(to_light) / dt;
@@ -276,6 +302,17 @@ pub fn evaluate_swimming_fitness(
 
         let current_pos = creature.world.transforms[creature.world.root].translation;
         let disp = (current_pos - initial_pos).length();
+
+        // Physics divergence check.
+        if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE {
+            return FitnessResult {
+                score: 0.0,
+                distance: 0.0,
+                max_displacement: 0.0,
+                terminated_early: true,
+            };
+        }
+
         if disp > max_displacement {
             max_displacement = disp;
         }
@@ -380,6 +417,18 @@ pub fn evaluate_following_fitness(
             creature.step(config.dt);
 
             let current_pos = creature.world.transforms[creature.world.root].translation;
+
+            // Physics divergence check.
+            let disp = current_pos.length();
+            if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE {
+                return FitnessResult {
+                    score: 0.0,
+                    distance: 0.0,
+                    max_displacement: 0.0,
+                    terminated_early: true,
+                };
+            }
+
             let movement = current_pos - prev_pos;
 
             // Speed toward the light = projection of movement onto light direction.

@@ -58,6 +58,19 @@ pub fn sim_body_count(handle: &SimHandle) -> usize {
     handle.creature.world.bodies.len()
 }
 
+/// Current light position as [x, y, z].
+#[wasm_bindgen]
+pub fn sim_light_position(handle: &SimHandle) -> Vec<f64> {
+    let p = handle.creature.world.light_position;
+    vec![p.x, p.y, p.z]
+}
+
+/// Set the light position (for light-following playback).
+#[wasm_bindgen]
+pub fn sim_set_light_position(handle: &mut SimHandle, x: f64, y: f64, z: f64) {
+    handle.creature.world.light_position = glam::DVec3::new(x, y, z);
+}
+
 /// Initialize a simulation with a random creature (for demos).
 #[wasm_bindgen]
 pub fn sim_init_random(seed: u64) -> SimHandle {

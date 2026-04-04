@@ -1,3 +1,13 @@
+function formatAxis(v: number): string {
+  if (!isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs === 0) return "0";
+  if (abs >= 1e6) return v.toExponential(1);
+  if (abs >= 1) return v.toFixed(1);
+  if (abs >= 0.01) return v.toFixed(3);
+  return v.toExponential(1);
+}
+
 interface Props {
   stats: { generation: number; best_fitness: number; avg_fitness: number }[];
   width?: number;
@@ -66,7 +76,7 @@ export default function FitnessChart({
         fontSize="10"
         textAnchor="end"
       >
-        {maxFit.toFixed(1)}
+        {formatAxis(maxFit)}
       </text>
       <text
         x={padding.left - 5}

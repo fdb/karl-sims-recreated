@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { initWasm, sim_init, sim_step_accurate, sim_body_count, sim_transforms } from "../wasm";
+import { initWasm, sim_init, sim_step_accurate, sim_body_count, sim_transforms, sim_light_position, sim_set_light_position } from "../wasm";
 
 interface Props {
   genomeBytes: Uint8Array;
   environment?: "Water" | "Land";
+  goal?: "SwimmingSpeed" | "LightFollowing";
 }
 
 const SIM_DURATION = 10.0; // seconds
@@ -13,7 +14,7 @@ const DT = 1.0 / 60.0;
 const TOTAL_FRAMES = Math.round(SIM_DURATION / DT); // 600
 const STRIDE = 10; // values per body: px py pz qw qx qy qz hx hy hz
 
-export default function CreatureViewer({ genomeBytes, environment = "Water" }: Props) {
+export default function CreatureViewer({ genomeBytes, environment = "Water", goal = "SwimmingSpeed" }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const animIdRef = useRef<number>(0);
@@ -32,6 +33,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
   const isPlayingRef = useRef(true);
   const totalFramesRef = useRef(TOTAL_FRAMES);
   const meshesRef = useRef<THREE.Mesh[]>([]);
+  const lightPositionsRef = useRef<[number, number, number][]>([]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -119,6 +121,38 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
       }
       meshesRef.current = meshes;
 
+      // Light target indicator (only for LightFollowing)
+      let lightSphere: THREE.Mesh | null = null;
+      if (goal === "LightFollowing") {
+        // Set initial light position on the simulation
+        sim_set_light_position(handle, 5.0, 0.0, 0.0);
+
+        const lightMat = new THREE.MeshBasicMaterial({
+          color: 0xffee88,
+          transparent: true,
+          opacity: 0.8,
+        });
+        lightSphere = new THREE.Mesh(
+          new THREE.SphereGeometry(0.3, 16, 16),
+          lightMat,
+        );
+        lightSphere.position.set(5, 0, 0);
+        scene.add(lightSphere);
+
+        // Glow ring around the light
+        const glowMat = new THREE.MeshBasicMaterial({
+          color: 0xffee88,
+          transparent: true,
+          opacity: 0.2,
+          side: THREE.DoubleSide,
+        });
+        const glow = new THREE.Mesh(
+          new THREE.SphereGeometry(0.6, 16, 16),
+          glowMat,
+        );
+        lightSphere.add(glow);
+      }
+
       // Apply frame 0 (initial state before any stepping)
       const initialTransforms = sim_transforms(handle);
       applyTransforms(initialTransforms, meshes);
@@ -162,8 +196,16 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
 
       // --- Pre-compute all frames ---
       const allFrames: Float64Array[] = [initialTransforms.slice()];
+      const allLightPositions: [number, number, number][] = [];
       let firstNanFrame: number | null = null;
 
+      // Store initial light position
+      if (goal === "LightFollowing") {
+        const lp = sim_light_position(handle);
+        allLightPositions.push([lp[0], lp[1], lp[2]]);
+      }
+
+      const REPOSITION_INTERVAL = 300; // 5 seconds at 60fps
       const BATCH_SIZE = 30;
       for (let start = 0; start < TOTAL_FRAMES; start += BATCH_SIZE) {
         if (cancelled) return;
@@ -171,10 +213,21 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
 
         const end = Math.min(start + BATCH_SIZE, TOTAL_FRAMES);
         for (let i = start; i < end; i++) {
+          // Reposition light every 5 seconds (matching fitness evaluation logic)
+          if (goal === "LightFollowing" && i > 0 && i % REPOSITION_INTERVAL === 0) {
+            const angle = (i * 0.01) * 2.0;
+            sim_set_light_position(handle, 5.0 * Math.cos(angle), 0.0, 5.0 * Math.sin(angle));
+          }
+
           const t = sim_step_accurate(handle);
           const hasNaN = someNotFinite(t);
           if (hasNaN && firstNanFrame === null) firstNanFrame = i + 1;
           allFrames.push(hasNaN ? allFrames[allFrames.length - 1] : t.slice());
+
+          if (goal === "LightFollowing") {
+            const lp = sim_light_position(handle);
+            allLightPositions.push([lp[0], lp[1], lp[2]]);
+          }
         }
 
         setProgress(end / TOTAL_FRAMES);
@@ -240,6 +293,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
       }
 
       framesRef.current = allFrames;
+      lightPositionsRef.current = allLightPositions;
       totalFramesRef.current = allFrames.length;
       setTotalFrames(allFrames.length);
       setIsComputing(false);
@@ -259,6 +313,14 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
         const frameData = framesRef.current[currentFrameRef.current];
         if (frameData) applyTransforms(frameData, meshes);
 
+        // Update light indicator position
+        if (lightSphere && lightPositionsRef.current.length > 0) {
+          const lp = lightPositionsRef.current[
+            Math.min(currentFrameRef.current, lightPositionsRef.current.length - 1)
+          ];
+          if (lp) lightSphere.position.set(lp[0], lp[1], lp[2]);
+        }
+
         controls.update();
         renderer.render(scene, camera);
       };
@@ -275,8 +337,9 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
       }
       framesRef.current = [];
       meshesRef.current = [];
+      lightPositionsRef.current = [];
     };
-  }, [genomeBytes, environment]);
+  }, [genomeBytes, environment, goal]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
