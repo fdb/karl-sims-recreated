@@ -1,0 +1,184 @@
+{
+  "name": "Swimming Starfish",
+  "bodies": [
+    {
+      "dimensions": [
+        1.0,
+        0.6,
+        1.0
+      ]
+    },
+    {
+      "dimensions": [
+        1.0,
+        0.16,
+        0.5
+      ]
+    },
+    {
+      "dimensions": [
+        1.0,
+        0.16,
+        0.5
+      ]
+    },
+    {
+      "dimensions": [
+        1.0,
+        0.16,
+        0.5
+      ]
+    },
+    {
+      "dimensions": [
+        1.0,
+        0.16,
+        0.5
+      ]
+    }
+  ],
+  "joints": [
+    {
+      "parent": 0,
+      "child": 1,
+      "joint_type": "revolute",
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "secondary_axis": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_anchor": [
+        0.5,
+        0.0,
+        0.0
+      ],
+      "child_anchor": [
+        -0.5,
+        0.0,
+        0.0
+      ],
+      "angle_min": -0.8,
+      "angle_max": 0.8,
+      "damping": 0.3
+    },
+    {
+      "parent": 0,
+      "child": 2,
+      "joint_type": "revolute",
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "secondary_axis": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_anchor": [
+        -0.5,
+        0.0,
+        0.0
+      ],
+      "child_anchor": [
+        0.5,
+        0.0,
+        0.0
+      ],
+      "angle_min": -0.8,
+      "angle_max": 0.8,
+      "damping": 0.3
+    },
+    {
+      "parent": 0,
+      "child": 3,
+      "joint_type": "revolute",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "secondary_axis": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_anchor": [
+        0.0,
+        0.0,
+        0.5
+      ],
+      "child_anchor": [
+        0.0,
+        0.0,
+        -0.25
+      ],
+      "angle_min": -0.8,
+      "angle_max": 0.8,
+      "damping": 0.3
+    },
+    {
+      "parent": 0,
+      "child": 4,
+      "joint_type": "revolute",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "secondary_axis": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_anchor": [
+        0.0,
+        0.0,
+        -0.5
+      ],
+      "child_anchor": [
+        0.0,
+        0.0,
+        0.25
+      ],
+      "angle_min": -0.8,
+      "angle_max": 0.8,
+      "damping": 0.3
+    }
+  ],
+  "torques": [
+    {
+      "joint": 0,
+      "dof": 0,
+      "amplitude": 2.0,
+      "frequency": 3.0,
+      "phase": 0.0
+    },
+    {
+      "joint": 1,
+      "dof": 0,
+      "amplitude": 2.0,
+      "frequency": 3.0,
+      "phase": 3.141592653589793
+    },
+    {
+      "joint": 2,
+      "dof": 0,
+      "amplitude": 2.0,
+      "frequency": 3.0,
+      "phase": 1.5707963267948966
+    },
+    {
+      "joint": 3,
+      "dof": 0,
+      "amplitude": 2.0,
+      "frequency": 3.0,
+      "phase": 4.71238898038469
+    }
+  ]
+}

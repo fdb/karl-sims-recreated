@@ -1,0 +1,100 @@
+{
+  "name": "Walking Biped",
+  "bodies": [
+    {
+      "dimensions": [
+        0.6,
+        0.4,
+        0.5
+      ]
+    },
+    {
+      "dimensions": [
+        0.15,
+        0.5,
+        0.15
+      ]
+    },
+    {
+      "dimensions": [
+        0.15,
+        0.5,
+        0.15
+      ]
+    }
+  ],
+  "joints": [
+    {
+      "parent": 0,
+      "child": 1,
+      "joint_type": "revolute",
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "secondary_axis": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_anchor": [
+        0.0,
+        -0.2,
+        0.15
+      ],
+      "child_anchor": [
+        0.0,
+        0.25,
+        0.0
+      ],
+      "angle_min": -0.5,
+      "angle_max": 0.5,
+      "damping": 1.0
+    },
+    {
+      "parent": 0,
+      "child": 2,
+      "joint_type": "revolute",
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "secondary_axis": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "parent_anchor": [
+        0.0,
+        -0.2,
+        -0.15
+      ],
+      "child_anchor": [
+        0.0,
+        0.25,
+        0.0
+      ],
+      "angle_min": -0.5,
+      "angle_max": 0.5,
+      "damping": 1.0
+    }
+  ],
+  "torques": [
+    {
+      "joint": 0,
+      "dof": 0,
+      "amplitude": 1.0,
+      "frequency": 1.0,
+      "phase": 0.0
+    },
+    {
+      "joint": 1,
+      "dof": 0,
+      "amplitude": 1.0,
+      "frequency": 1.0,
+      "phase": 3.141592653589793
+    }
+  ]
+}

@@ -102,7 +102,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       // --- WASM simulation handle ---
       let handle;
       try {
-        handle = sim_init(genomeBytes);
+        handle = sim_init(genomeBytes, environment);
       } catch (e) {
         console.error("CreatureViewer: sim_init failed:", e);
         return;
@@ -236,25 +236,10 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
 
       if (cancelled) return;
 
-      // --- Find the minimum Y extent across all frames (bottom of lowest body part) ---
-      // This gives us where to place the floor so the creature never clips below it.
-      let minBodyY = Infinity;
-      for (const frame of allFrames) {
-        for (let i = 0; i < bodyCount; i++) {
-          const b = i * STRIDE;
-          const posY = frame[b + 1]; // py
-          const hy   = frame[b + 8]; // half-height
-          if (isFinite(posY) && isFinite(hy)) {
-            minBodyY = Math.min(minBodyY, posY - hy);
-          }
-        }
-      }
-      if (!isFinite(minBodyY)) minBodyY = -0.5;
-
       // --- Add floor/water reference plane (after frames are computed) ---
       if (environment === "Land") {
-        // Checkered floor with good contrast, positioned at the creature's lowest point
-        const floorY = minBodyY - 0.01;
+        // Ground plane is at y=0 in the physics engine
+        const floorY = 0;
         const checker = buildCheckerTexture();
         const ground = new THREE.Mesh(
           new THREE.PlaneGeometry(80, 80),

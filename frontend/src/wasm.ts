@@ -1,12 +1,20 @@
-import init, { sim_init, sim_init_random, sim_step, sim_step_accurate, sim_transforms, sim_body_count, sim_light_position, sim_set_light_position } from "karl-sims-web";
+import init, {
+  sim_init, sim_init_random, sim_step, sim_step_accurate, sim_transforms, sim_body_count,
+  sim_light_position, sim_set_light_position,
+  scene_init, scene_step, scene_transforms, scene_body_count, scene_list,
+} from "karl-sims-web";
 
-let initialized: Promise<void> | null = null;
+let ready: Promise<void> | null = null;
 
 export function initWasm(): Promise<void> {
-  if (!initialized) {
-    initialized = init().then(() => {});
+  if (!ready) {
+    ready = init().then(() => {});
   }
-  return initialized;
+  return ready;
 }
 
-export { sim_init, sim_init_random, sim_step, sim_step_accurate, sim_transforms, sim_body_count, sim_light_position, sim_set_light_position };
+export {
+  sim_init, sim_init_random, sim_step, sim_step_accurate, sim_transforms, sim_body_count,
+  sim_light_position, sim_set_light_position,
+  scene_init, scene_step, scene_transforms, scene_body_count, scene_list,
+};

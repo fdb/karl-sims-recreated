@@ -2,6 +2,7 @@ pub mod body;
 pub mod joint;
 pub mod world;
 pub mod scene;
+pub mod creature_def;
 pub mod spatial;
 pub mod featherstone;
 pub mod water;

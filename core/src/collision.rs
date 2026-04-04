@@ -188,6 +188,9 @@ pub fn detect_ground_collisions(
 }
 
 /// Compute penalty forces from ground contacts (only applies to body_a).
+/// Coefficient of friction for ground contacts.
+pub const GROUND_FRICTION: f64 = 0.8;
+
 pub fn compute_ground_forces(
     contacts: &[Contact],
     transforms: &[DAffine3],
@@ -205,14 +208,27 @@ pub fn compute_ground_forces(
         let vel_a = body_velocities.get(a).map(|v| v.linear()).unwrap_or(DVec3::ZERO);
         let vel_normal = vel_a.dot(contact.normal);
 
-        let force_mag = (stiffness * contact.depth - damping * vel_normal).max(0.0);
-        let force_world = contact.normal * force_mag;
+        let normal_force_mag = (stiffness * contact.depth - damping * vel_normal).max(0.0);
+        let normal_force = contact.normal * normal_force_mag;
 
+        // Coulomb friction: oppose tangential velocity, capped at μ * F_normal
+        let vel_tangent = vel_a - contact.normal * vel_normal;
+        let tangent_speed = vel_tangent.length();
+        let friction_force = if tangent_speed > 1e-8 {
+            let max_friction = GROUND_FRICTION * normal_force_mag;
+            // Smooth friction: proportional at low speeds, Coulomb cap at high speeds
+            let friction_mag = max_friction.min(tangent_speed * damping * 2.0);
+            -vel_tangent.normalize() * friction_mag
+        } else {
+            DVec3::ZERO
+        };
+
+        let total_force = normal_force + friction_force;
         let r = contact.point - transforms[a].translation;
-        let torque_world = r.cross(force_world);
+        let torque_world = r.cross(total_force);
         let rot_inv = transforms[a].matrix3.transpose();
 
-        forces[a] = forces[a] + SVec6::new(rot_inv * torque_world, rot_inv * force_world);
+        forces[a] = forces[a] + SVec6::new(rot_inv * torque_world, rot_inv * total_force);
     }
 
     forces

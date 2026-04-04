@@ -16,15 +16,29 @@ pub struct SimHandle {
 }
 
 /// Initialize a simulation from serialized genome bytes.
-/// Water drag is enabled so the sim is stable — creatures are evolved in water.
+/// `environment` should be "Water" or "Land".
 #[wasm_bindgen]
-pub fn sim_init(genome_bytes: &[u8]) -> Result<SimHandle, JsValue> {
+pub fn sim_init(genome_bytes: &[u8], environment: &str) -> Result<SimHandle, JsValue> {
     let genome: GenomeGraph = bincode::deserialize(genome_bytes)
         .map_err(|e| JsValue::from_str(&format!("Failed to deserialize genome: {e}")))?;
     let mut creature = Creature::from_genome(genome);
-    creature.world.water_enabled = true;
-    creature.world.water_viscosity = 2.0;
-    creature.world.gravity = glam::DVec3::ZERO;
+    match environment {
+        "Land" => {
+            creature.world.water_enabled = false;
+            creature.world.gravity = glam::DVec3::new(0.0, -9.81, 0.0);
+            creature.world.collisions_enabled = true;
+            creature.world.ground_enabled = true;
+            creature.world.set_root_transform(
+                glam::DAffine3::from_translation(glam::DVec3::new(0.0, 2.0, 0.0)),
+            );
+            creature.world.forward_kinematics();
+        }
+        _ => {
+            creature.world.water_enabled = true;
+            creature.world.water_viscosity = 2.0;
+            creature.world.gravity = glam::DVec3::ZERO;
+        }
+    }
     Ok(SimHandle { creature })
 }
 
@@ -84,8 +98,72 @@ pub fn sim_init_random(seed: u64) -> SimHandle {
     SimHandle { creature }
 }
 
+/// Opaque handle for scene-based creatures (hand-crafted, no brain).
+#[wasm_bindgen]
+pub struct SceneHandle {
+    world: karl_sims_core::world::World,
+    def: karl_sims_core::creature_def::CreatureDefinition,
+}
+
+/// Initialize a scene creature by name. Environment: "Water" or "Land".
+#[wasm_bindgen]
+pub fn scene_init(name: &str, environment: &str) -> Result<SceneHandle, JsValue> {
+    let def = karl_sims_core::creature_def::builtin(name)
+        .ok_or_else(|| JsValue::from_str(&format!("Unknown scene: {name}")))?;
+    let mut world = def.build_world();
+
+    match environment {
+        "Land" => {
+            world.water_enabled = false;
+            world.gravity = glam::DVec3::new(0.0, -9.81, 0.0);
+            world.collisions_enabled = true;
+            world.ground_enabled = true;
+            world.set_root_transform(
+                glam::DAffine3::from_translation(glam::DVec3::new(0.0, 2.0, 0.0)),
+            );
+            world.forward_kinematics();
+        }
+        _ => {
+            world.water_enabled = true;
+            world.water_viscosity = 2.0;
+            world.gravity = glam::DVec3::ZERO;
+        }
+    }
+
+    Ok(SceneHandle { world, def })
+}
+
+/// List available scene names (comma-separated).
+#[wasm_bindgen]
+pub fn scene_list() -> String {
+    karl_sims_core::creature_def::builtin_names().join(",")
+}
+
+/// Step a scene simulation and return transforms.
+#[wasm_bindgen]
+pub fn scene_step(handle: &mut SceneHandle) -> Vec<f64> {
+    handle.def.apply_torques(&mut handle.world);
+    handle.world.step(1.0 / 60.0);
+    collect_world_transforms(&handle.world)
+}
+
+/// Read current transforms from a scene handle.
+#[wasm_bindgen]
+pub fn scene_transforms(handle: &SceneHandle) -> Vec<f64> {
+    collect_world_transforms(&handle.world)
+}
+
+/// Body count for a scene handle.
+#[wasm_bindgen]
+pub fn scene_body_count(handle: &SceneHandle) -> usize {
+    handle.world.bodies.len()
+}
+
 fn collect_transforms(creature: &Creature) -> Vec<f64> {
-    let world = &creature.world;
+    collect_world_transforms(&creature.world)
+}
+
+fn collect_world_transforms(world: &karl_sims_core::world::World) -> Vec<f64> {
     let mut out = Vec::with_capacity(world.bodies.len() * 10);
 
     for (i, body) in world.bodies.iter().enumerate() {

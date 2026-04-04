@@ -252,8 +252,8 @@ impl World {
                     &self.transforms,
                     body_vels,
                     self.bodies.len(),
-                    crate::collision::COLLISION_STIFFNESS * 2.0, // stiffer for ground
-                    crate::collision::COLLISION_DAMPING * 2.0,
+                    crate::collision::COLLISION_STIFFNESS * 4.0, // stiffer for ground
+                    crate::collision::COLLISION_DAMPING * 8.0,  // high damping prevents bouncing
                 );
                 for (i, f) in ground_forces.into_iter().enumerate() {
                     if i < ext_forces.len() {
@@ -286,6 +286,15 @@ impl World {
         }
     }
 
+    /// Predict root position/velocity at a trial time offset using ballistic
+    /// trajectory under gravity. This ensures ground collision detection sees
+    /// an approximately correct root position during each RK45 evaluation.
+    fn predict_root(&mut self, orig_pos: DVec3, orig_vel: DVec3, trial_t: f64) {
+        self.transforms[self.root].translation =
+            orig_pos + orig_vel * trial_t + self.gravity * 0.5 * trial_t * trial_t;
+        self.root_velocity = orig_vel + self.gravity * trial_t;
+    }
+
     /// Run one adaptive RK45 step, returning (new_state, dt_used, dt_next).
     /// Inlined here to avoid borrow-checker issues with closures over &mut self.
     fn rk45_adaptive_step(
@@ -298,13 +307,25 @@ impl World {
         dt = dt.clamp(config.min_dt, config.max_dt);
         let n = base.angles.len();
 
+        // Save root state — predict root position at each trial time so ground
+        // collision detection sees an approximately correct root position.
+        let orig_root_pos = self.transforms[self.root].translation;
+        let orig_root_vel = self.root_velocity;
+        let orig_root_ang_vel = self.root_angular_velocity;
+
+        // RK45 Butcher tableau c values (trial time fractions)
+        const C_FRAC: [f64; 6] = [0.0, 0.25, 3.0/8.0, 12.0/13.0, 1.0, 0.5];
+
         for _attempt in 0..8 {
+            self.predict_root(orig_root_pos, orig_root_vel, C_FRAC[0] * dt);
             let k1 = self.evaluate(base, dof_map);
 
             let s2 = trial_state(base, &[k1.clone()], &[B21], dt);
+            self.predict_root(orig_root_pos, orig_root_vel, C_FRAC[1] * dt);
             let k2 = self.evaluate(&s2, dof_map);
 
             let s3 = trial_state(base, &[k1.clone(), k2.clone()], &[B31, B32], dt);
+            self.predict_root(orig_root_pos, orig_root_vel, C_FRAC[2] * dt);
             let k3 = self.evaluate(&s3, dof_map);
 
             let s4 = trial_state(
@@ -313,6 +334,7 @@ impl World {
                 &[B41, B42, B43],
                 dt,
             );
+            self.predict_root(orig_root_pos, orig_root_vel, C_FRAC[3] * dt);
             let k4 = self.evaluate(&s4, dof_map);
 
             let s5 = trial_state(
@@ -321,6 +343,7 @@ impl World {
                 &[B51, B52, B53, B54],
                 dt,
             );
+            self.predict_root(orig_root_pos, orig_root_vel, C_FRAC[4] * dt);
             let k5 = self.evaluate(&s5, dof_map);
 
             let s6 = trial_state(
@@ -329,6 +352,7 @@ impl World {
                 &[B61, B62, B63, B64, B65],
                 dt,
             );
+            self.predict_root(orig_root_pos, orig_root_vel, C_FRAC[5] * dt);
             let k6 = self.evaluate(&s6, dof_map);
 
             let ks = [k1, k2, k3, k4, k5, k6];
@@ -345,6 +369,13 @@ impl World {
             }
 
             if error < 1e-15 {
+                // Restore root to pre-prediction state; integrate_root() handles actual motion.
+                // Re-evaluate at accepted state for correct root_accel.
+                self.transforms[self.root].translation = orig_root_pos;
+                self.root_velocity = orig_root_vel;
+                self.root_angular_velocity = orig_root_ang_vel;
+                self.set_state(&y4, dof_map);
+                self.evaluate(&y4, dof_map);
                 return (y4, dt, dt);
             }
 
@@ -352,6 +383,11 @@ impl World {
             let dt_optimal = dt_optimal.clamp(config.min_dt, config.max_dt);
 
             if error <= config.tolerance {
+                self.transforms[self.root].translation = orig_root_pos;
+                self.root_velocity = orig_root_vel;
+                self.root_angular_velocity = orig_root_ang_vel;
+                self.set_state(&y4, dof_map);
+                self.evaluate(&y4, dof_map);
                 return (y4, dt, dt_optimal);
             }
 
@@ -359,10 +395,48 @@ impl World {
         }
 
         // Fallback: Euler step with minimum dt
+        self.transforms[self.root].translation = orig_root_pos;
+        self.root_velocity = orig_root_vel;
+        self.root_angular_velocity = orig_root_ang_vel;
         let dt_min = config.min_dt;
         let deriv = self.evaluate(base, dof_map);
         let fallback = base.advance(&deriv, dt_min);
         (fallback, dt_min, dt_min)
+    }
+
+    /// Integrate root body position/velocity using current `last_root_accel`.
+    /// Called after each sub-step so the root tracks the adaptive integrator.
+    fn integrate_root(&mut self, dt: f64) {
+        let root_accel = self.last_root_accel;
+        let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
+        let actual_accel = root_accel - gravity_spatial;
+
+        self.root_velocity += (actual_accel.linear() + self.gravity) * dt;
+        self.root_angular_velocity += actual_accel.angular() * dt;
+
+        // Clamp root velocity to prevent runaway dynamics.
+        // 5 m/s ≈ 18 km/h, well beyond any realistic creature speed.
+        const MAX_ROOT_SPEED: f64 = 5.0;
+        let speed = self.root_velocity.length();
+        if speed > MAX_ROOT_SPEED {
+            self.root_velocity *= MAX_ROOT_SPEED / speed;
+        }
+        let ang_speed = self.root_angular_velocity.length();
+        if ang_speed > MAX_ROOT_SPEED {
+            self.root_angular_velocity *= MAX_ROOT_SPEED / ang_speed;
+        }
+
+        self.transforms[self.root].translation += self.root_velocity * dt;
+
+        let ang = self.root_angular_velocity;
+        let ang_mag = ang.length();
+        if ang_mag > 1e-10 {
+            let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * dt);
+            let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
+            self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
+        }
+
+        self.forward_kinematics();
     }
 
     pub fn step(&mut self, frame_dt: f64) {
@@ -371,7 +445,10 @@ impl World {
         if !dof_map.is_empty() {
             let config = IntegratorConfig::default();
             let mut remaining = frame_dt;
-            let mut dt = self.suggested_dt.min(remaining);
+            // Don't carry over collapsed step sizes from previous frames.
+            // Cap minimum suggested_dt to avoid >100 sub-steps per frame.
+            let min_suggested = frame_dt / 100.0;
+            let mut dt = self.suggested_dt.max(min_suggested).min(remaining);
 
             while remaining > 1e-10 {
                 let step_dt = dt.min(remaining);
@@ -380,45 +457,32 @@ impl World {
                 let (new_state, dt_used, dt_next) =
                     self.rk45_adaptive_step(&base_state, step_dt, &dof_map, &config);
 
-                // If the integrator produced NaN, stop — don't let the adaptive
-                // loop run at min_dt for the rest of the frame (54M sub-steps).
+                // If the integrator produced NaN, stop.
                 let has_nan = new_state.angles.iter().chain(&new_state.velocities)
                     .any(|v| !v.is_finite());
                 self.set_state(&new_state, &dof_map);
+
+                // Integrate root body at this sub-step's dt, not the full frame_dt.
+                self.integrate_root(dt_used);
+
                 remaining -= dt_used;
                 dt = dt_next;
                 self.suggested_dt = dt;
                 if has_nan { break; }
             }
         } else {
-            // No joints — still evaluate to get root acceleration from gravity/contacts
-            let empty_state = self.get_state(&dof_map);
-            self.evaluate(&empty_state, &dof_map);
+            // No joints — sub-step the root body for stable ground contact.
+            let sub_dt: f64 = 1.0 / 240.0; // 4 sub-steps per frame at 60fps
+            let mut remaining = frame_dt;
+            while remaining > 1e-10 {
+                let dt = sub_dt.min(remaining);
+                let empty_state = self.get_state(&dof_map);
+                self.evaluate(&empty_state, &dof_map);
+                self.integrate_root(dt);
+                remaining -= dt;
+            }
         }
 
-        // Integrate root body for both water and land.
-        // actual_accel = root_accel - gravity_spatial strips the Featherstone gravity trick,
-        // yielding the net force / mass from drag and contact.  Gravity is then re-applied
-        // explicitly so that land creatures fall and water creatures (gravity=0) are unaffected.
-        let root_accel = self.last_root_accel;
-        let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
-        let actual_accel = root_accel - gravity_spatial;
-
-        self.root_velocity += (actual_accel.linear() + self.gravity) * frame_dt;
-        self.root_angular_velocity += actual_accel.angular() * frame_dt;
-
-        let displacement = self.root_velocity * frame_dt;
-        self.transforms[self.root].translation += displacement;
-
-        let ang = self.root_angular_velocity;
-        let ang_mag = ang.length();
-        if ang_mag > 1e-10 {
-            let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * frame_dt);
-            let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
-            self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
-        }
-
-        self.forward_kinematics();
         self.time += frame_dt;
     }
 
@@ -438,22 +502,7 @@ impl World {
             self.joints[ji].angles[di] += self.joints[ji].velocities[di] * dt;
         }
 
-        // Root body integration for both water and land (same logic as step).
-        let root_accel = self.last_root_accel;
-        let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
-        let actual_accel = root_accel - gravity_spatial;
-        self.root_velocity += (actual_accel.linear() + self.gravity) * dt;
-        self.root_angular_velocity += actual_accel.angular() * dt;
-        self.transforms[self.root].translation += self.root_velocity * dt;
-        let ang = self.root_angular_velocity;
-        let ang_mag = ang.length();
-        if ang_mag > 1e-10 {
-            let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * dt);
-            let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
-            self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
-        }
-
-        self.forward_kinematics();
+        self.integrate_root(dt);
         self.time += dt;
     }
 }
@@ -526,6 +575,180 @@ mod tests {
             world.step(dt);
         }
         assert!(world.joints[0].angles[0] < 3.0, "angle: {}", world.joints[0].angles[0]);
+    }
+
+    /// A two-body articulated creature at y=2 with gravity should fall.
+    /// This is the minimal reproducer for the floating bug.
+    #[test]
+    fn two_body_falls_under_gravity() {
+        let mut world = World::new();
+        let root = world.add_body(DVec3::new(0.5, 0.5, 0.5));
+        let child = world.add_body(DVec3::new(0.3, 0.2, 0.2));
+        world.root = root;
+        world.gravity = DVec3::new(0.0, -9.81, 0.0);
+        world.ground_enabled = true;
+        world.collisions_enabled = true;
+
+        let joint = Joint::revolute(
+            root, child,
+            DVec3::new(0.5, 0.0, 0.0),
+            DVec3::new(-0.3, 0.0, 0.0),
+            DVec3::Z,
+        );
+        world.add_joint(joint);
+        world.set_root_transform(DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)));
+        world.forward_kinematics();
+
+        let dt = 1.0 / 60.0;
+        let mut positions = Vec::new();
+        for step in 0..120 {
+            world.step(dt);
+            if step % 10 == 0 {
+                positions.push(world.transforms[0].translation.y);
+            }
+        }
+
+        let final_y = world.transforms[0].translation.y;
+        assert!(
+            final_y < 1.5,
+            "Two-body creature should fall from y=2, got final y={final_y:.4}. \
+             Trajectory (every 10 frames): {positions:?}"
+        );
+    }
+
+    /// A single body at y=2 with gravity should fall downward.
+    /// This tests the root body integration in the RK45 step.
+    #[test]
+    fn free_fall_single_body() {
+        let mut world = World::new();
+        world.add_body(DVec3::new(0.5, 0.5, 0.5));
+        world.root = 0;
+        world.gravity = DVec3::new(0.0, -9.81, 0.0);
+        world.set_root_transform(DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)));
+
+        let dt = 1.0 / 60.0;
+        for _ in 0..60 {
+            world.step(dt);
+        }
+
+        let root_y = world.transforms[0].translation.y;
+        // After 1s of free fall: y = 2 - 0.5*9.81*1^2 = -2.905
+        // Should be well below starting height
+        assert!(
+            root_y < 0.0,
+            "After 1s free fall from y=2, root should be below y=0, got y={root_y:.4}"
+        );
+    }
+
+    /// A body falling under gravity should come to rest on the ground plane (y=0).
+    #[test]
+    fn ground_contact_stops_fall() {
+        let mut world = World::new();
+        world.add_body(DVec3::new(0.5, 0.5, 0.5));
+        world.root = 0;
+        world.gravity = DVec3::new(0.0, -9.81, 0.0);
+        world.ground_enabled = true;
+        world.collisions_enabled = true;
+        world.set_root_transform(DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)));
+
+        let dt = 1.0 / 60.0;
+        // Run for 5 seconds — plenty of time to fall and settle
+        for _ in 0..300 {
+            world.step(dt);
+        }
+
+        let root_y = world.transforms[0].translation.y;
+        // Body half-extents.y = 0.5, so center should rest near y=0.5
+        // Allow some tolerance for penalty spring equilibrium
+        assert!(
+            root_y < 1.5,
+            "Body should have fallen from y=2, got y={root_y:.4}"
+        );
+        assert!(
+            root_y > -0.5,
+            "Body should not have fallen through ground, got y={root_y:.4}"
+        );
+    }
+
+    /// Internal joint torques should not create net linear force on a floating base.
+    /// This is a fundamental conservation-of-momentum property.
+    #[test]
+    fn internal_torques_no_net_root_translation() {
+        let mut world = World::new();
+        let root = world.add_body(DVec3::new(0.5, 0.5, 0.5));
+        let child = world.add_body(DVec3::new(0.3, 0.2, 0.2));
+        world.root = root;
+        world.set_root_transform(DAffine3::IDENTITY);
+        // No gravity, no water, no ground — only internal torques
+        world.gravity = DVec3::ZERO;
+
+        let joint = Joint::revolute(
+            root, child,
+            DVec3::new(0.5, 0.0, 0.0),
+            DVec3::new(-0.3, 0.0, 0.0),
+            DVec3::Z,
+        );
+        world.add_joint(joint);
+        world.torques[0][0] = 5.0; // Apply torque on the joint
+
+        let dt = 1.0 / 60.0;
+        for _ in 0..120 {
+            world.step(dt);
+        }
+
+        let root_pos = world.transforms[0].translation;
+        let displacement = root_pos.length();
+        // Internal torques should not move the center of mass
+        // Allow small numerical drift but not large displacement
+        assert!(
+            displacement < 0.1,
+            "Internal torques moved root by {displacement:.4} — should be near zero"
+        );
+    }
+
+    /// Simulate a full Creature under land conditions.
+    /// The creature should fall under gravity, not float upward.
+    #[test]
+    fn creature_falls_under_gravity_with_brain() {
+        use crate::creature::Creature;
+        use crate::genotype::GenomeGraph;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+
+        // Use seed=4 which barely floats (y=2.5) — easiest to diagnose
+        let mut rng = ChaCha8Rng::seed_from_u64(4);
+        let genome = GenomeGraph::random(&mut rng);
+        let mut creature = Creature::from_genome(genome);
+
+        creature.world.water_enabled = false;
+        creature.world.gravity = DVec3::new(0.0, -9.81, 0.0);
+        creature.world.collisions_enabled = true;
+        creature.world.ground_enabled = true;
+        creature.world.set_root_transform(
+            DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)),
+        );
+        creature.world.forward_kinematics();
+
+        eprintln!("Bodies: {}, Joints: {}", creature.world.bodies.len(), creature.world.joints.len());
+
+        let dt = 1.0 / 60.0;
+        for step in 0..120 {
+            creature.world.step(dt);
+            let ry = creature.world.transforms[creature.world.root].translation.y;
+            let rv = creature.world.root_velocity.y;
+            if step < 20 || step % 20 == 0 {
+                eprintln!(
+                    "  step {:3}: root_y={:8.4} root_vy={:8.4}",
+                    step, ry, rv
+                );
+            }
+        }
+
+        let root_y = creature.world.transforms[creature.world.root].translation.y;
+        assert!(
+            root_y < 2.0,
+            "Creature should fall from y=2, got y={root_y:.4}"
+        );
     }
 
     #[test]

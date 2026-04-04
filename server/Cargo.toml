@@ -12,6 +12,10 @@ path = "src/main.rs"
 name = "karl-sims-debug"
 path = "src/bin/debug.rs"
 
+[[bin]]
+name = "karl-sims-simulate"
+path = "src/bin/simulate.rs"
+
 [dependencies]
 karl-sims-core = { path = "../core" }
 glam = "0.30"
