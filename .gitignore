@@ -2,3 +2,7 @@
 web/pkg
 frontend/node_modules
 frontend/dist
+*.db
+*.db-shm
+*.db-wal
+.playwright-mcp/
