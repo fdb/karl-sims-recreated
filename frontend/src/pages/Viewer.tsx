@@ -31,7 +31,7 @@ export default function Viewer() {
       // Scene
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x1a2a30);
-      scene.fog = new THREE.Fog(0x1a2a30, 12, 40);
+      scene.fog = new THREE.Fog(0x1a2a30, 30, 120);
 
       const camera = new THREE.PerspectiveCamera(45, mount.clientWidth / mount.clientHeight, 0.01, 100);
       camera.position.set(3, 2.5, 5);

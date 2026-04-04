@@ -59,7 +59,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water" }: P
       const scene = new THREE.Scene();
       const bgColor = environment === "Water" ? 0x0d1e2e : 0x1a2a30;
       scene.background = new THREE.Color(bgColor);
-      scene.fog = new THREE.Fog(bgColor, 15, 50);
+      scene.fog = new THREE.Fog(bgColor, 30, 120);
 
       const w = mount.clientWidth || 400;
       const h = mount.clientHeight || 300;
