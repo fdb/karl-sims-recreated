@@ -33,6 +33,24 @@ async fn main() {
         tx: tx.clone(),
     };
 
+    // Resume any evolutions that were running when the server last stopped.
+    {
+        let conn = db.lock().unwrap();
+        let evos = db::list_evolutions(&conn);
+        for evo in &evos {
+            if evo.status == "running" {
+                let db_c = db.clone();
+                let tx_c = tx.clone();
+                let evo_id = evo.id;
+                log::info!("Resuming evolution {evo_id} (gen {})", evo.current_gen);
+                tokio::spawn(async move {
+                    coordinator::run_evolution(db_c, evo_id, Some(tx_c)).await;
+                });
+            }
+            // Paused evolutions stay paused — not resumed automatically
+        }
+    }
+
     // Build axum app: REST API + WebSocket + static file serving.
     let cors = tower_http::cors::CorsLayer::new()
         .allow_origin(tower_http::cors::Any)

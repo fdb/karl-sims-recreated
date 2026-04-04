@@ -36,19 +36,40 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         ..Default::default()
     };
 
-    // Generation 0: create initial random population and enqueue tasks.
-    let pop = Population::random_initial(config.clone(), &mut rng);
-    {
+    // Check if this evolution already has generations (resuming after server restart).
+    let start_gen = {
+        let conn = db.lock().unwrap();
+        get_evolution_status(&conn, evo_id)
+            .map(|(_, current_gen)| current_gen)
+            .unwrap_or(0) as usize
+    };
+
+    // Only create generation 0 if the evolution is brand new (no genotypes yet).
+    let has_genotypes = {
+        let conn = db.lock().unwrap();
+        !get_generation_fitnesses(&conn, evo_id, 0).is_empty()
+            || pending_task_count(&conn, evo_id) > 0
+    };
+
+    if !has_genotypes {
+        log::info!("Evolution {evo_id}: creating initial population");
+        let pop = Population::random_initial(config.clone(), &mut rng);
         let conn = db.lock().unwrap();
         for ind in &pop.individuals {
             let bytes = bincode::serialize(&ind.genome).unwrap();
             let gid = insert_genotype(&conn, evo_id, 0, &bytes, None);
             create_task(&conn, evo_id, gid);
         }
+    } else {
+        log::info!("Evolution {evo_id}: resuming from generation {start_gen}");
+        // Advance the RNG to match where we left off (approximate)
+        for _ in 0..start_gen * params.population_size {
+            let _: f64 = rng.r#gen();
+        }
     }
 
     let max_generations = params.max_generations;
-    for cur_gen in 0..max_generations {
+    for cur_gen in start_gen..max_generations {
         // Check if the evolution has been stopped or paused.
         loop {
             let status = {
