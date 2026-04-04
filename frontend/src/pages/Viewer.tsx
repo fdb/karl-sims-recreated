@@ -169,7 +169,7 @@ export default function Viewer() {
   );
 }
 
-function applyTransforms(data: number[], meshes: THREE.Mesh[]) {
+function applyTransforms(data: Float64Array, meshes: THREE.Mesh[]) {
   const STRIDE = 10;
   for (let i = 0; i < meshes.length; i++) {
     const b = i * STRIDE;

@@ -1,18 +1,49 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { initWasm, sim_init, sim_step, sim_body_count } from "../wasm";
+import { initWasm, sim_init, sim_step_accurate, sim_body_count, sim_transforms } from "../wasm";
 
 interface Props {
   genomeBytes: Uint8Array;
 }
 
+const SIM_DURATION = 10.0; // seconds
+const DT = 1.0 / 60.0;
+const TOTAL_FRAMES = Math.round(SIM_DURATION / DT); // 600
+
 export default function CreatureViewer({ genomeBytes }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef<{
-    renderer: THREE.WebGLRenderer;
-    animId: number;
-  } | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const animIdRef = useRef<number>(0);
+
+  const [progress, setProgress] = useState(0); // 0..1 during pre-computation
+  const [isComputing, setIsComputing] = useState(true);
+  const [currentFrame, setCurrentFrame] = useState(0);
+  const [totalFrames, setTotalFrames] = useState(TOTAL_FRAMES);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [hasNan, setHasNan] = useState(false);
+  const [nanFrame, setNanFrame] = useState<number | null>(null);
+
+  // Mutable refs for animation loop (avoids stale closures)
+  const framesRef = useRef<Float64Array[]>([]);
+  const currentFrameRef = useRef(0);
+  const isPlayingRef = useRef(true);
+  const totalFramesRef = useRef(TOTAL_FRAMES);
+  const meshesRef = useRef<THREE.Mesh[]>([]);
+
+  // Keep play ref in sync
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  // Seek: set frame from slider
+  const seekTo = useCallback((frame: number) => {
+    currentFrameRef.current = frame;
+    setCurrentFrame(frame);
+    if (meshesRef.current.length > 0 && framesRef.current[frame]) {
+      applyTransforms(framesRef.current[frame], meshesRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -40,6 +71,7 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       mount.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
@@ -86,7 +118,7 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       ground.receiveShadow = true;
       scene.add(ground);
 
-      // --- WASM simulation ---
+      // --- WASM simulation handle ---
       let handle;
       try {
         handle = sim_init(genomeBytes);
@@ -107,14 +139,16 @@ export default function CreatureViewer({ genomeBytes }: Props) {
         scene.add(mesh);
         meshes.push(mesh);
       }
+      meshesRef.current = meshes;
 
-      // Get first frame of transforms
-      const firstTransforms = sim_step(handle);
-      applyTransforms(firstTransforms, meshes);
+      // Apply frame 0 (initial state before any stepping)
+      const initialTransforms = sim_transforms(handle);
+      applyTransforms(initialTransforms, meshes);
 
-      // Auto-fit camera to the creature's bounding box
+      // Auto-fit camera to the creature's initial bounding box
       if (meshes.length > 0) {
         const box = new THREE.Box3();
+        scene.updateMatrixWorld(true);
         for (const mesh of meshes) box.expandByObject(mesh);
         if (!box.isEmpty()) {
           const center = new THREE.Vector3();
@@ -131,9 +165,7 @@ export default function CreatureViewer({ genomeBytes }: Props) {
           );
           camera.lookAt(center);
           camera.updateProjectionMatrix();
-          console.log(
-            `CreatureViewer: center=(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}) maxDim=${maxDim.toFixed(2)}`
-          );
+          controls.update();
         }
       }
 
@@ -148,52 +180,194 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       });
       resizeObs.observe(mount);
 
-      // Animation loop
-      let animId: number;
-      let frameCount = 0;
+      // Render the initial frame while pre-computing
+      renderer.render(scene, camera);
+
+      // --- Pre-compute all frames asynchronously ---
+      // Store frame 0 (initial) first
+      const allFrames: Float64Array[] = [initialTransforms.slice()];
+      let firstNanFrame: number | null = null;
+
+      // Process frames in batches to avoid blocking the UI
+      const BATCH_SIZE = 30;
+      for (let start = 0; start < TOTAL_FRAMES; start += BATCH_SIZE) {
+        if (cancelled) return;
+
+        // Yield to the event loop between batches
+        await new Promise<void>((r) => setTimeout(r, 0));
+
+        const end = Math.min(start + BATCH_SIZE, TOTAL_FRAMES);
+        for (let i = start; i < end; i++) {
+          const t = sim_step_accurate(handle);
+          const hasNaN = someNotFinite(t);
+          if (hasNaN && firstNanFrame === null) {
+            firstNanFrame = i + 1;
+          }
+          allFrames.push(hasNaN ? allFrames[allFrames.length - 1] : t.slice());
+        }
+
+        setProgress((end) / TOTAL_FRAMES);
+        // Render current progress
+        renderer.render(scene, camera);
+      }
+
+      if (cancelled) return;
+
+      framesRef.current = allFrames;
+      totalFramesRef.current = allFrames.length;
+      setTotalFrames(allFrames.length);
+      setIsComputing(false);
+      setNanFrame(firstNanFrame);
+      setHasNan(firstNanFrame !== null);
+
+      if (firstNanFrame !== null) {
+        console.log(`CreatureViewer: NaN in accurate sim at frame ${firstNanFrame}`);
+      }
+
+      // --- Playback animation loop ---
       const animate = () => {
-        animId = requestAnimationFrame(animate);
-        const transforms = sim_step(handle);
+        animIdRef.current = requestAnimationFrame(animate);
 
-        // Debug: log first 5 frames
-        if (frameCount < 5) {
-          const p0 = `(${transforms[0].toFixed(3)}, ${transforms[1].toFixed(3)}, ${transforms[2].toFixed(3)})`;
-          const hasNaN = transforms.some((v) => !isFinite(v));
-          console.log(`CreatureViewer frame ${frameCount}: body[0]=${p0} NaN=${hasNaN}`);
-          frameCount++;
+        if (isPlayingRef.current) {
+          currentFrameRef.current =
+            (currentFrameRef.current + 1) % totalFramesRef.current;
+          setCurrentFrame(currentFrameRef.current);
         }
 
-        // NaN guard: skip update if physics has diverged
-        if (transforms.some((v) => !isFinite(v))) {
-          console.warn("CreatureViewer: NaN/Inf in transforms, freezing on last valid frame");
-          controls.update();
-          renderer.render(scene, camera);
-          return;
+        const frameData = framesRef.current[currentFrameRef.current];
+        if (frameData) {
+          applyTransforms(frameData, meshes);
         }
 
-        applyTransforms(transforms, meshes);
         controls.update();
         renderer.render(scene, camera);
       };
-      animId = requestAnimationFrame(animate);
-      stateRef.current = { renderer, animId };
+      animIdRef.current = requestAnimationFrame(animate);
     })();
 
     return () => {
       cancelled = true;
-      if (stateRef.current) {
-        cancelAnimationFrame(stateRef.current.animId);
-        stateRef.current.renderer.dispose();
-        stateRef.current.renderer.domElement.remove();
-        stateRef.current = null;
+      cancelAnimationFrame(animIdRef.current);
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+        rendererRef.current.domElement.remove();
+        rendererRef.current = null;
       }
+      framesRef.current = [];
+      meshesRef.current = [];
     };
   }, [genomeBytes]);
 
-  return <div ref={mountRef} style={{ width: "100%", height: "100%" }} />;
+  return (
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      <div ref={mountRef} style={{ width: "100%", height: "100%" }} />
+
+      {/* Loading overlay */}
+      {isComputing && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            padding: "8px 12px",
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              flex: 1,
+              height: 4,
+              background: "#2a3d44",
+              borderRadius: 2,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${progress * 100}%`,
+                background: "#4a9eca",
+                borderRadius: 2,
+                transition: "width 0.1s",
+              }}
+            />
+          </div>
+          <span style={{ color: "#aac", fontSize: 11, whiteSpace: "nowrap" }}>
+            {Math.round(progress * 100)}%
+          </span>
+        </div>
+      )}
+
+      {/* Timeline controls */}
+      {!isComputing && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            padding: "6px 10px",
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          {/* Play/Pause */}
+          <button
+            onClick={() => setIsPlaying((p) => !p)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#ccc",
+              cursor: "pointer",
+              fontSize: 14,
+              padding: "0 4px",
+              lineHeight: 1,
+            }}
+            title={isPlaying ? "Pause" : "Play"}
+          >
+            {isPlaying ? "⏸" : "▶"}
+          </button>
+
+          {/* Scrubber */}
+          <input
+            type="range"
+            min={0}
+            max={totalFrames - 1}
+            value={currentFrame}
+            onChange={(e) => {
+              setIsPlaying(false);
+              seekTo(Number(e.target.value));
+            }}
+            style={{ flex: 1, accentColor: "#4a9eca", cursor: "pointer" }}
+          />
+
+          {/* Frame counter */}
+          <span
+            style={{
+              color: hasNan && nanFrame !== null && currentFrame >= nanFrame
+                ? "#f87171"
+                : "#aac",
+              fontSize: 11,
+              fontFamily: "monospace",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {(currentFrame / 60).toFixed(1)}s
+            {hasNan && nanFrame !== null && currentFrame >= nanFrame && " ⚠"}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function applyTransforms(data: number[], meshes: THREE.Mesh[]) {
+function applyTransforms(data: Float64Array, meshes: THREE.Mesh[]) {
   const STRIDE = 10;
   for (let i = 0; i < meshes.length; i++) {
     const b = i * STRIDE;
@@ -203,4 +377,11 @@ function applyTransforms(data: number[], meshes: THREE.Mesh[]) {
     // half_extents × 2 = full box size
     meshes[i].scale.set(data[b + 7] * 2, data[b + 8] * 2, data[b + 9] * 2);
   }
+}
+
+function someNotFinite(arr: Float64Array): boolean {
+  for (let i = 0; i < arr.length; i++) {
+    if (!isFinite(arr[i])) return true;
+  }
+  return false;
 }

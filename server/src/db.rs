@@ -50,6 +50,13 @@ pub fn init_db(path: &str) -> DbPool {
     )
     .expect("Failed to create tables");
 
+    // Migrate: add name column if it doesn't exist yet (safe to run multiple times).
+    conn.execute(
+        "ALTER TABLE evolutions ADD COLUMN name TEXT",
+        [],
+    )
+    .ok(); // Silently ignores "duplicate column" error on subsequent startups.
+
     // Reset any tasks stuck in 'running' state from a previous crash.
     // These would never be picked up otherwise.
     conn.execute(
@@ -62,13 +69,22 @@ pub fn init_db(path: &str) -> DbPool {
 }
 
 /// Insert a new evolution run, return its ID.
-pub fn create_evolution(conn: &Connection, config_json: &str) -> i64 {
+pub fn create_evolution(conn: &Connection, config_json: &str, name: Option<&str>) -> i64 {
     conn.execute(
-        "INSERT INTO evolutions (config_json) VALUES (?1)",
-        params![config_json],
+        "INSERT INTO evolutions (config_json, name) VALUES (?1, ?2)",
+        params![config_json, name],
     )
     .expect("Failed to create evolution");
     conn.last_insert_rowid()
+}
+
+/// Update the name of an evolution.
+pub fn set_evolution_name(conn: &Connection, evo_id: i64, name: Option<&str>) {
+    conn.execute(
+        "UPDATE evolutions SET name=?1, updated_at=datetime('now') WHERE id=?2",
+        params![name, evo_id],
+    )
+    .expect("Failed to update evolution name");
 }
 
 /// Insert a genotype, return its ID.
@@ -191,12 +207,12 @@ pub fn get_evolution_status(conn: &Connection, evo_id: i64) -> Option<(String, i
     .ok()
 }
 
-/// Get status, current generation, and config_json for an evolution.
-pub fn get_evolution_full(conn: &Connection, evo_id: i64) -> Option<(String, i64, String)> {
+/// Get status, current generation, config_json, and name for an evolution.
+pub fn get_evolution_full(conn: &Connection, evo_id: i64) -> Option<(String, i64, String, Option<String>)> {
     conn.query_row(
-        "SELECT status, current_gen, config_json FROM evolutions WHERE id = ?1",
+        "SELECT status, current_gen, config_json, name FROM evolutions WHERE id = ?1",
         params![evo_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     )
     .ok()
 }
@@ -330,12 +346,13 @@ pub struct EvolutionRow {
     pub current_gen: i64,
     pub created_at: String,
     pub updated_at: String,
+    pub name: Option<String>,
 }
 
 /// List all evolutions.
 pub fn list_evolutions(conn: &Connection) -> Vec<EvolutionRow> {
     let mut stmt = conn
-        .prepare("SELECT id, config_json, status, current_gen, created_at, updated_at FROM evolutions ORDER BY id DESC")
+        .prepare("SELECT id, config_json, status, current_gen, created_at, updated_at, name FROM evolutions ORDER BY id DESC")
         .expect("Failed to prepare list_evolutions");
 
     stmt.query_map([], |row| {
@@ -346,6 +363,7 @@ pub fn list_evolutions(conn: &Connection) -> Vec<EvolutionRow> {
             current_gen: row.get(3)?,
             created_at: row.get(4)?,
             updated_at: row.get(5)?,
+            name: row.get(6)?,
         })
     })
     .expect("Failed to list evolutions")

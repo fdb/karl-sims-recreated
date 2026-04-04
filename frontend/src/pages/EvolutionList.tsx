@@ -76,7 +76,12 @@ export default function EvolutionList() {
             className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 bg-bg-surface border border-border-subtle rounded-lg hover:bg-bg-elevated hover:border-border transition-all no-underline text-inherit"
           >
             <StatusBadge status={evo.status} />
-            <span className="font-medium">Evolution #{evo.id}</span>
+            <span className="font-medium">
+              {evo.name ?? `Evolution #${evo.id}`}
+            </span>
+            {evo.name && (
+              <span className="text-text-muted text-xs">#{evo.id}</span>
+            )}
             <span className="text-text-secondary text-sm">
               Gen {evo.generation}
             </span>

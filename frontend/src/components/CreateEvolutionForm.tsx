@@ -15,6 +15,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [maxParts, setMaxParts] = useState(20);
   const [gravity, setGravity] = useState(9.81);
   const [viscosity, setViscosity] = useState(2.0);
+  const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
 
   const handleSubmit = async () => {
@@ -28,6 +29,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       max_parts: maxParts,
       gravity: environment === "land" ? gravity : undefined,
       water_viscosity: environment === "water" ? viscosity : undefined,
+      name: name.trim() || undefined,
     });
     setCreating(false);
     onCreated();
@@ -42,6 +44,19 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       <h3 className="text-lg font-semibold mb-4">New Evolution Run</h3>
 
       <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+        {/* Name (optional, spans full width) */}
+        <div className="col-span-2">
+          <label className={labelClass}>Name <span className="text-text-muted">(optional)</span></label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Water swimmers v2"
+            maxLength={100}
+            className={inputClass}
+          />
+        </div>
+
         {/* Goal */}
         <div>
           <label className={labelClass}>Fitness Goal</label>

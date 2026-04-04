@@ -22,7 +22,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
     let params: EvolutionParams = {
         let conn = db.lock().unwrap();
         get_evolution_full(&conn, evo_id)
-            .and_then(|(_, _, config_json)| serde_json::from_str(&config_json).ok())
+            .and_then(|(_, _, config_json, _)| serde_json::from_str(&config_json).ok())
             .unwrap_or_default()
     };
 

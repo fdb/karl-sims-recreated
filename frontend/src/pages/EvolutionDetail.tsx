@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getEvolution,
   stopEvolution,
@@ -6,6 +6,7 @@ import {
   resumeEvolution,
   getBestCreatures,
   getEvolutionStats,
+  updateEvolutionName,
   type Evolution,
   type CreatureInfo,
   type GenerationStats,
@@ -25,6 +26,11 @@ export default function EvolutionDetail({ evoId }: Props) {
   const [historicalStats, setHistoricalStats] = useState<GenerationStats[]>([]);
   const liveStats = useEvolutionUpdates();
 
+  // Inline name editing
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
   const refresh = useCallback(async () => {
     const evo = await getEvolution(evoId);
     setEvolution(evo);
@@ -39,6 +45,18 @@ export default function EvolutionDetail({ evoId }: Props) {
     const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  const startEditName = () => {
+    setNameInput(evolution?.name ?? "");
+    setEditingName(true);
+    setTimeout(() => nameInputRef.current?.focus(), 0);
+  };
+
+  const commitName = async () => {
+    setEditingName(false);
+    await updateEvolutionName(evoId, nameInput.trim());
+    refresh();
+  };
 
   const handleStop = async () => {
     await stopEvolution(evoId);
@@ -84,8 +102,35 @@ export default function EvolutionDetail({ evoId }: Props) {
 
       {/* Header with actions */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">Evolution #{evoId}</h1>
+        <div className="flex items-center gap-3 min-w-0">
+          {editingName ? (
+            <input
+              ref={nameInputRef}
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitName();
+                if (e.key === "Escape") setEditingName(false);
+              }}
+              placeholder={`Evolution #${evoId}`}
+              maxLength={100}
+              className="text-2xl font-semibold bg-transparent border-b border-accent outline-none text-text-primary w-64"
+            />
+          ) : (
+            <h1
+              className="text-2xl font-semibold cursor-pointer hover:text-accent transition-colors"
+              title="Click to rename"
+              onClick={startEditName}
+            >
+              {evolution?.name ?? `Evolution #${evoId}`}
+              {evolution?.name && (
+                <span className="text-text-muted text-sm font-normal ml-2">
+                  #{evoId}
+                </span>
+              )}
+            </h1>
+          )}
           {evolution && <StatusBadge status={evolution.status} />}
         </div>
         <div className="flex gap-2">

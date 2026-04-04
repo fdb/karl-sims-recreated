@@ -571,6 +571,7 @@ dependencies = [
  "axum",
  "bincode",
  "env_logger",
+ "glam",
  "karl-sims-core",
  "log",
  "num_cpus",

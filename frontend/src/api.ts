@@ -14,6 +14,7 @@ export interface Evolution {
   status: string;
   generation: number;
   config?: EvolutionConfig;
+  name?: string;
 }
 
 export interface CreatureInfo {
@@ -42,6 +43,7 @@ export interface CreateEvolutionParams {
   max_parts: number;
   gravity?: number;
   water_viscosity?: number;
+  name?: string;
 }
 
 export async function createEvolution(
@@ -90,6 +92,14 @@ export async function pauseEvolution(id: number): Promise<void> {
 
 export async function resumeEvolution(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}/resume`, { method: "POST" });
+}
+
+export async function updateEvolutionName(id: number, name: string): Promise<void> {
+  await fetch(`${API_BASE}/api/evolutions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
 }
 
 export interface GenotypeInfo {

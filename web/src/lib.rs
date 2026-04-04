@@ -38,6 +38,14 @@ pub fn sim_step(handle: &mut SimHandle) -> Vec<f64> {
     collect_transforms(&handle.creature)
 }
 
+/// Advance simulation using the accurate RK45 integrator (same as fitness evaluation).
+/// Slower than sim_step but numerically stable — use for pre-computing playback frames.
+#[wasm_bindgen]
+pub fn sim_step_accurate(handle: &mut SimHandle) -> Vec<f64> {
+    handle.creature.step(1.0 / 60.0);
+    collect_transforms(&handle.creature)
+}
+
 /// Read current transforms without stepping — useful for initial frame.
 #[wasm_bindgen]
 pub fn sim_transforms(handle: &SimHandle) -> Vec<f64> {

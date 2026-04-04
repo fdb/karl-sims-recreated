@@ -22,6 +22,8 @@ struct EvolutionInfo {
     generation: i64,
     config: String,
     created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -34,6 +36,12 @@ struct CreateEvolutionRequest {
     max_parts: Option<usize>,
     gravity: Option<f64>,
     water_viscosity: Option<f64>,
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PatchEvolutionRequest {
+    name: Option<String>,
 }
 
 pub fn routes() -> Router<AppState> {
@@ -42,7 +50,10 @@ pub fn routes() -> Router<AppState> {
             "/api/evolutions",
             axum::routing::get(list_evolutions).post(create_evolution),
         )
-        .route("/api/evolutions/{id}", axum::routing::get(get_evolution))
+        .route(
+            "/api/evolutions/{id}",
+            axum::routing::get(get_evolution).patch(patch_evolution),
+        )
         .route("/api/evolutions/{id}/best", axum::routing::get(get_best))
         .route(
             "/api/evolutions/{id}/stop",
@@ -78,6 +89,7 @@ async fn list_evolutions(State(state): State<AppState>) -> Json<Vec<EvolutionInf
                 generation: e.current_gen,
                 config: e.config_json,
                 created_at: e.created_at,
+                name: e.name,
             })
             .collect(),
     )
@@ -108,7 +120,7 @@ async fn create_evolution(
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
         let conn = state.db.lock().unwrap();
-        db::create_evolution(&conn, &config_json)
+        db::create_evolution(&conn, &config_json, req.name.as_deref())
     };
 
     // Spawn coordinator for this evolution.
@@ -127,7 +139,7 @@ async fn get_evolution(
 ) -> Json<serde_json::Value> {
     let conn = state.db.lock().unwrap();
     match db::get_evolution_full(&conn, id) {
-        Some((status, generation, config_json)) => {
+        Some((status, generation, config_json, name)) => {
             let config = serde_json::from_str::<serde_json::Value>(&config_json)
                 .unwrap_or_default();
             Json(serde_json::json!({
@@ -135,10 +147,23 @@ async fn get_evolution(
                 "status": status,
                 "generation": generation,
                 "config": config,
+                "name": name,
             }))
         }
         None => Json(serde_json::json!({"error": "not found"})),
     }
+}
+
+async fn patch_evolution(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<PatchEvolutionRequest>,
+) -> Json<serde_json::Value> {
+    let conn = state.db.lock().unwrap();
+    // Trim whitespace; treat empty string as None (remove name)
+    let name = req.name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    db::set_evolution_name(&conn, id, name.as_deref());
+    Json(serde_json::json!({"id": id, "name": name}))
 }
 
 async fn get_best(
