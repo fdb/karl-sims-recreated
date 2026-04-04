@@ -89,8 +89,8 @@ pub fn create_task(conn: &Connection, evo_id: i64, genotype_id: i64) -> i64 {
     conn.last_insert_rowid()
 }
 
-/// Atomically claim the next pending task. Returns `(task_id, genome_bytes)`.
-pub fn claim_task(conn: &Connection, worker_id: &str) -> Option<(i64, Vec<u8>)> {
+/// Atomically claim the next pending task. Returns `(task_id, genome_bytes, config_json)`.
+pub fn claim_task(conn: &Connection, worker_id: &str) -> Option<(i64, Vec<u8>, String)> {
     // Use a single UPDATE ... RETURNING to atomically claim a task.
     let mut stmt = conn
         .prepare(
@@ -101,17 +101,17 @@ pub fn claim_task(conn: &Connection, worker_id: &str) -> Option<(i64, Vec<u8>)> 
                    AND evolution_id IN (SELECT id FROM evolutions WHERE status='running')
                  LIMIT 1
              )
-             RETURNING id, genotype_id",
+             RETURNING id, genotype_id, evolution_id",
         )
         .ok()?;
 
-    let result: Option<(i64, i64)> = stmt
+    let result: Option<(i64, i64, i64)> = stmt
         .query_row(params![worker_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })
         .ok();
 
-    let (task_id, genotype_id) = result?;
+    let (task_id, genotype_id, evolution_id) = result?;
 
     // Fetch genome bytes separately.
     let genome_bytes: Vec<u8> = conn
@@ -122,7 +122,16 @@ pub fn claim_task(conn: &Connection, worker_id: &str) -> Option<(i64, Vec<u8>)> 
         )
         .ok()?;
 
-    Some((task_id, genome_bytes))
+    // Fetch the evolution's config_json.
+    let config_json: String = conn
+        .query_row(
+            "SELECT config_json FROM evolutions WHERE id = ?1",
+            params![evolution_id],
+            |row| row.get(0),
+        )
+        .ok()?;
+
+    Some((task_id, genome_bytes, config_json))
 }
 
 /// Mark a task as completed and store its fitness on both the task and genotype.
@@ -147,6 +156,16 @@ pub fn get_evolution_status(conn: &Connection, evo_id: i64) -> Option<(String, i
         "SELECT status, current_gen FROM evolutions WHERE id = ?1",
         params![evo_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .ok()
+}
+
+/// Get status, current generation, and config_json for an evolution.
+pub fn get_evolution_full(conn: &Connection, evo_id: i64) -> Option<(String, i64, String)> {
+    conn.query_row(
+        "SELECT status, current_gen, config_json FROM evolutions WHERE id = ?1",
+        params![evo_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
     .ok()
 }

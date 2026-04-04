@@ -3,24 +3,34 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 use karl_sims_core::evolution::EvolutionConfig;
-use karl_sims_core::fitness::FitnessConfig;
+use karl_sims_core::fitness::{EvolutionParams, FitnessConfig};
 use karl_sims_core::genotype::GenomeGraph;
 use karl_sims_core::evolution::Population;
 
 use tokio::sync::broadcast;
 
 use crate::db::{
-    create_task, get_evolution_status, get_genotype, get_generation_fitnesses,
+    create_task, get_evolution_status, get_evolution_full, get_genotype, get_generation_fitnesses,
     insert_genotype, pending_task_count, update_evolution, DbPool,
 };
 
 /// Run a full evolution loop, persisting every generation to the database.
 pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender<String>>) {
     let mut rng = ChaCha8Rng::seed_from_u64(evo_id as u64);
+
+    // Read params from DB.
+    let params: EvolutionParams = {
+        let conn = db.lock().unwrap();
+        get_evolution_full(&conn, evo_id)
+            .and_then(|(_, _, config_json)| serde_json::from_str(&config_json).ok())
+            .unwrap_or_default()
+    };
+
     let config = EvolutionConfig {
-        population_size: 50,
+        population_size: params.population_size,
         fitness: FitnessConfig {
-            sim_duration: 5.0,
+            sim_duration: params.sim_duration,
+            max_parts: params.max_parts,
             ..Default::default()
         },
         ..Default::default()
@@ -37,7 +47,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         }
     }
 
-    let max_generations = 100;
+    let max_generations = params.max_generations;
     for cur_gen in 0..max_generations {
         // Check if the evolution has been stopped or paused.
         loop {

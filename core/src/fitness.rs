@@ -1,10 +1,192 @@
 use glam::DVec3;
+use serde::{Deserialize, Serialize};
 
 use crate::creature::Creature;
 use crate::genotype::GenomeGraph;
 
 // ---------------------------------------------------------------------------
-// Config
+// Unified evolution params (serialized to JSON in the DB)
+// ---------------------------------------------------------------------------
+
+/// The fitness goal to optimize for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FitnessGoal {
+    SwimmingSpeed,
+    LightFollowing,
+}
+
+/// Environment type — affects gravity, water drag.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Environment {
+    Water,
+    Land,
+}
+
+/// Complete evolution parameters — serialized to JSON in the DB.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolutionParams {
+    pub population_size: usize,
+    pub max_generations: usize,
+    pub goal: FitnessGoal,
+    pub environment: Environment,
+    pub sim_duration: f64,
+    pub max_parts: usize,
+}
+
+impl Default for EvolutionParams {
+    fn default() -> Self {
+        Self {
+            population_size: 50,
+            max_generations: 100,
+            goal: FitnessGoal::SwimmingSpeed,
+            environment: Environment::Water,
+            sim_duration: 10.0,
+            max_parts: 20,
+        }
+    }
+}
+
+/// Evaluate fitness based on the configured goal and environment.
+pub fn evaluate_fitness(genome: &GenomeGraph, params: &EvolutionParams) -> FitnessResult {
+    let mut creature = Creature::from_genome(genome.clone());
+
+    // Apply environment settings.
+    match params.environment {
+        Environment::Water => {
+            creature.world.water_enabled = true;
+            creature.world.gravity = DVec3::ZERO;
+        }
+        Environment::Land => {
+            creature.world.water_enabled = false;
+            creature.world.gravity = DVec3::new(0.0, -9.81, 0.0);
+            creature.world.collisions_enabled = true;
+        }
+    }
+
+    // Viability check.
+    if creature.world.bodies.len() > params.max_parts {
+        return FitnessResult {
+            score: 0.0,
+            distance: 0.0,
+            max_displacement: 0.0,
+            terminated_early: true,
+        };
+    }
+
+    match params.goal {
+        FitnessGoal::SwimmingSpeed => evaluate_speed_fitness(&mut creature, params),
+        FitnessGoal::LightFollowing => evaluate_following(genome, params),
+    }
+}
+
+fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> FitnessResult {
+    let dt = 1.0 / 60.0;
+    let total_steps = (params.sim_duration / dt).round() as usize;
+    let early_check_step = (2.0 / dt).round() as usize;
+    let initial_pos = creature.world.transforms[creature.world.root].translation;
+    let mut max_displacement: f64 = 0.0;
+
+    for step in 0..total_steps {
+        creature.step(dt);
+        let pos = creature.world.transforms[creature.world.root].translation;
+        let disp = (pos - initial_pos).length();
+        max_displacement = max_displacement.max(disp);
+        if step + 1 == early_check_step && disp < 0.01 {
+            return FitnessResult {
+                score: 0.0,
+                distance: 0.0,
+                max_displacement,
+                terminated_early: true,
+            };
+        }
+    }
+
+    let final_pos = creature.world.transforms[creature.world.root].translation;
+    let distance = (final_pos - initial_pos).length();
+    let horizontal_distance = match params.environment {
+        Environment::Land => {
+            let diff = final_pos - initial_pos;
+            DVec3::new(diff.x, 0.0, diff.z).length()
+        }
+        Environment::Water => distance,
+    };
+
+    FitnessResult {
+        score: horizontal_distance * 0.7 + max_displacement * 0.3,
+        distance: horizontal_distance,
+        max_displacement,
+        terminated_early: false,
+    }
+}
+
+fn evaluate_following(genome: &GenomeGraph, params: &EvolutionParams) -> FitnessResult {
+    let dt = 1.0 / 60.0;
+    let light_positions = [
+        DVec3::new(5.0, 0.0, 0.0),
+        DVec3::new(-5.0, 0.0, 0.0),
+        DVec3::new(0.0, 0.0, 5.0),
+        DVec3::new(0.0, 0.0, -5.0),
+    ];
+    let num_trials = 4;
+    let steps_per_trial = (params.sim_duration / dt) as usize;
+    let reposition_steps = (5.0 / dt) as usize;
+
+    let mut total_score = 0.0;
+
+    for trial in 0..num_trials {
+        let mut creature = Creature::from_genome(genome.clone());
+        match params.environment {
+            Environment::Water => {
+                creature.world.water_enabled = true;
+                creature.world.gravity = DVec3::ZERO;
+            }
+            Environment::Land => {
+                creature.world.water_enabled = false;
+                creature.world.gravity = DVec3::new(0.0, -9.81, 0.0);
+                creature.world.collisions_enabled = true;
+            }
+        }
+
+        creature.world.light_position = light_positions[trial];
+        let mut prev_pos = creature.world.transforms[creature.world.root].translation;
+        let mut speed_sum = 0.0;
+        let mut samples = 0;
+
+        for step in 0..steps_per_trial {
+            if step > 0 && step % reposition_steps == 0 {
+                let angle = (trial as f64 + step as f64 * 0.01) * 2.0;
+                creature.world.light_position =
+                    DVec3::new(5.0 * angle.cos(), 0.0, 5.0 * angle.sin());
+            }
+            creature.step(dt);
+            let pos = creature.world.transforms[creature.world.root].translation;
+            let movement = pos - prev_pos;
+            let to_light = (creature.world.light_position - pos).normalize_or_zero();
+            let speed = movement.dot(to_light) / dt;
+            if speed > 0.0 {
+                speed_sum += speed;
+            }
+            samples += 1;
+            prev_pos = pos;
+        }
+
+        total_score += if samples > 0 {
+            speed_sum / samples as f64
+        } else {
+            0.0
+        };
+    }
+
+    FitnessResult {
+        score: total_score / num_trials as f64,
+        distance: total_score / num_trials as f64,
+        max_displacement: 0.0,
+        terminated_early: false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy config (kept for backward compatibility with existing tests)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]

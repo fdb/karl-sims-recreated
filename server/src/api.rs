@@ -3,6 +3,8 @@ use axum::response::IntoResponse;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use karl_sims_core::fitness::{Environment, EvolutionParams, FitnessGoal};
+
 use crate::coordinator;
 use crate::db::{self, DbPool};
 use crate::ws::UpdateSender;
@@ -26,6 +28,10 @@ struct EvolutionInfo {
 struct CreateEvolutionRequest {
     population_size: Option<usize>,
     generations: Option<usize>,
+    goal: Option<String>,
+    environment: Option<String>,
+    sim_duration: Option<f64>,
+    max_parts: Option<usize>,
 }
 
 pub fn routes() -> Router<AppState> {
@@ -75,13 +81,26 @@ async fn create_evolution(
     State(state): State<AppState>,
     Json(req): Json<CreateEvolutionRequest>,
 ) -> Json<serde_json::Value> {
-    let config = serde_json::json!({
-        "population_size": req.population_size.unwrap_or(50),
-        "generations": req.generations.unwrap_or(50),
-    });
+    let goal = match req.goal.as_deref() {
+        Some("light_following") => FitnessGoal::LightFollowing,
+        _ => FitnessGoal::SwimmingSpeed,
+    };
+    let env = match req.environment.as_deref() {
+        Some("land") => Environment::Land,
+        _ => Environment::Water,
+    };
+    let params = EvolutionParams {
+        population_size: req.population_size.unwrap_or(50),
+        max_generations: req.generations.unwrap_or(100),
+        goal,
+        environment: env,
+        sim_duration: req.sim_duration.unwrap_or(10.0),
+        max_parts: req.max_parts.unwrap_or(20),
+    };
+    let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
         let conn = state.db.lock().unwrap();
-        db::create_evolution(&conn, &config.to_string())
+        db::create_evolution(&conn, &config_json)
     };
 
     // Spawn coordinator for this evolution.
@@ -99,9 +118,16 @@ async fn get_evolution(
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
     let conn = state.db.lock().unwrap();
-    match db::get_evolution_status(&conn, id) {
-        Some((status, generation)) => {
-            Json(serde_json::json!({"id": id, "status": status, "generation": generation}))
+    match db::get_evolution_full(&conn, id) {
+        Some((status, generation, config_json)) => {
+            let config = serde_json::from_str::<serde_json::Value>(&config_json)
+                .unwrap_or_default();
+            Json(serde_json::json!({
+                "id": id,
+                "status": status,
+                "generation": generation,
+                "config": config,
+            }))
         }
         None => Json(serde_json::json!({"error": "not found"})),
     }

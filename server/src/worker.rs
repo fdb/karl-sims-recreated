@@ -1,4 +1,4 @@
-use karl_sims_core::fitness::{evaluate_swimming_fitness, FitnessConfig};
+use karl_sims_core::fitness::{evaluate_fitness, EvolutionParams};
 use karl_sims_core::genotype::GenomeGraph;
 
 use crate::db::{claim_task, complete_task, DbPool};
@@ -11,12 +11,13 @@ pub async fn run_worker(db: DbPool, worker_id: String) {
         };
 
         match task {
-            Some((task_id, genome_bytes)) => {
+            Some((task_id, genome_bytes, config_json)) => {
                 // Deserialize and evaluate fitness (CPU-bound, runs on the tokio thread).
                 match bincode::deserialize::<GenomeGraph>(&genome_bytes) {
                     Ok(genome) => {
-                        let result =
-                            evaluate_swimming_fitness(&genome, &FitnessConfig::default());
+                        let params: EvolutionParams =
+                            serde_json::from_str(&config_json).unwrap_or_default();
+                        let result = evaluate_fitness(&genome, &params);
                         let conn = db.lock().unwrap();
                         complete_task(&conn, task_id, result.score);
                     }
