@@ -10,9 +10,11 @@
     "build:wasm": "cd ../web && wasm-pack build --target web --dev && cd ../frontend && npm install"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.2.2",
     "karl-sims-web": "file:../web/pkg",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -20,7 +22,7 @@
     "@vitejs/plugin-react": "^4.4.0",
     "typescript": "~5.7.0",
     "vite": "^6.0.0",
-    "vite-plugin-wasm": "^3.4.0",
-    "vite-plugin-top-level-await": "^1.5.0"
+    "vite-plugin-top-level-await": "^1.5.0",
+    "vite-plugin-wasm": "^3.4.0"
   }
 }

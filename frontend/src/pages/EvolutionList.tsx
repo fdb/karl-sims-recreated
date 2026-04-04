@@ -8,6 +8,7 @@ import {
   type Evolution,
 } from "../api";
 import { navigate } from "../router";
+import StatusBadge from "../components/StatusBadge";
 
 export default function EvolutionList() {
   const [evolutions, setEvolutions] = useState<Evolution[]>([]);
@@ -45,87 +46,100 @@ export default function EvolutionList() {
   };
 
   return (
-    <div className="dashboard">
-      <div className="dashboard-header">
-        <h2>Evolution Runs</h2>
-        <div className="create-evo">
-          <label>Pop size:</label>
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-semibold">Evolution Runs</h1>
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-text-secondary">Population:</label>
           <input
             type="number"
             value={popSize}
             onChange={(e) => setPopSize(Number(e.target.value))}
             min={10}
             max={500}
+            className="w-20 px-3 py-1.5 bg-bg-surface border border-border rounded-md text-sm text-text-primary focus:outline-none focus:border-accent"
           />
-          <button onClick={handleCreate}>New Evolution</button>
+          <button
+            onClick={handleCreate}
+            className="px-4 py-1.5 bg-accent text-white rounded-md text-sm font-medium hover:bg-accent-hover transition-colors"
+          >
+            New Evolution
+          </button>
         </div>
       </div>
 
-      <div className="evo-list">
+      <div className="space-y-2">
         {evolutions.map((evo) => (
           <a
             key={evo.id}
-            className="evo-item"
             href={`/evolutions/${evo.id}`}
             onClick={(e) => {
               e.preventDefault();
               navigate(`/evolutions/${evo.id}`);
             }}
+            className="flex items-center gap-4 px-4 py-3 bg-bg-surface border border-border-subtle rounded-lg hover:bg-bg-elevated hover:border-border transition-all no-underline text-inherit"
           >
-            <span className={`status-badge ${evo.status}`}>{evo.status}</span>
-            <span>Evolution #{evo.id}</span>
-            <span>Gen {evo.generation}</span>
-            {evo.status === "running" && (
-              <>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    handlePause(evo.id);
-                  }}
-                >
-                  Pause
-                </button>
-                <button
-                  className="stop-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    handleStop(evo.id);
-                  }}
-                >
-                  Stop
-                </button>
-              </>
-            )}
-            {evo.status === "paused" && (
-              <>
-                <button
-                  className="resume-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    handleResume(evo.id);
-                  }}
-                >
-                  Resume
-                </button>
-                <button
-                  className="stop-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    handleStop(evo.id);
-                  }}
-                >
-                  Stop
-                </button>
-              </>
-            )}
+            <StatusBadge status={evo.status} />
+            <span className="font-medium">Evolution #{evo.id}</span>
+            <span className="text-text-secondary text-sm">
+              Gen {evo.generation}
+            </span>
+            <div className="ml-auto flex gap-2">
+              {evo.status === "running" && (
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handlePause(evo.id);
+                    }}
+                    className="px-3 py-1 text-xs bg-warning/20 text-warning rounded hover:bg-warning/30 transition-colors"
+                  >
+                    Pause
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleStop(evo.id);
+                    }}
+                    className="px-3 py-1 text-xs bg-danger/20 text-danger rounded hover:bg-danger/30 transition-colors"
+                  >
+                    Stop
+                  </button>
+                </>
+              )}
+              {evo.status === "paused" && (
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleResume(evo.id);
+                    }}
+                    className="px-3 py-1 text-xs bg-success/20 text-success rounded hover:bg-success/30 transition-colors"
+                  >
+                    Resume
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleStop(evo.id);
+                    }}
+                    className="px-3 py-1 text-xs bg-danger/20 text-danger rounded hover:bg-danger/30 transition-colors"
+                  >
+                    Stop
+                  </button>
+                </>
+              )}
+            </div>
           </a>
         ))}
         {evolutions.length === 0 && (
-          <p className="empty">No evolutions yet. Create one!</p>
+          <p className="text-text-muted italic py-8 text-center">
+            No evolutions yet. Create one!
+          </p>
         )}
       </div>
     </div>

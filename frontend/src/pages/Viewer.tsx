@@ -44,11 +44,12 @@ export default function Viewer({ ready }: Props) {
 
   return (
     <div>
-      <div className="controls">
+      <div className="flex items-center gap-4 mb-4">
         <select
           value={currentScene}
           onChange={handleSceneChange}
           disabled={!ready}
+          className="px-3 py-1.5 bg-bg-surface border border-border rounded-md text-sm text-text-primary focus:outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {SCENES.map((s) => (
             <option key={s.id} value={s.id}>
@@ -56,14 +57,24 @@ export default function Viewer({ ready }: Props) {
             </option>
           ))}
         </select>
-        <button onClick={handlePlayPause} disabled={!ready}>
+        <button
+          onClick={handlePlayPause}
+          disabled={!ready}
+          className="px-4 py-1.5 bg-bg-surface border border-border rounded-md text-sm text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
           {paused ? "Play" : "Pause"}
         </button>
-        <button onClick={handleReset} disabled={!ready}>
+        <button
+          onClick={handleReset}
+          disabled={!ready}
+          className="px-4 py-1.5 bg-bg-surface border border-border rounded-md text-sm text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
           Reset
         </button>
       </div>
-      <p className="hint">Drag to orbit. Scroll to zoom.</p>
+      <p className="text-text-muted text-xs mt-2">
+        Drag to orbit. Scroll to zoom.
+      </p>
     </div>
   );
 }

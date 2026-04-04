@@ -1,7 +1,10 @@
 import type { GenotypeInfo } from "../api";
 
 export default function MorphologyGraph({ info }: { info: GenotypeInfo }) {
-  const nodeW = 140, nodeH = 60, gapX = 180, gapY = 90;
+  const nodeW = 140,
+    nodeH = 60,
+    gapX = 180,
+    gapY = 90;
   const nodes = info.nodes;
   const conns = info.connections;
 
@@ -44,15 +47,23 @@ export default function MorphologyGraph({ info }: { info: GenotypeInfo }) {
     }
   }
 
-  const svgW = 600, svgH = Math.max(levels.length * gapY + 80, 200);
+  const svgW = 600,
+    svgH = Math.max(levels.length * gapY + 80, 200);
 
   return (
-    <svg width={svgW} height={svgH} className="morph-graph">
+    <svg width="100%" viewBox={`0 0 ${svgW} ${svgH}`}>
       {/* Arrow marker */}
       <defs>
-        <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5"
-          markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#555" />
+        <marker
+          id="arrow"
+          viewBox="0 0 10 10"
+          refX="10"
+          refY="5"
+          markerWidth="6"
+          markerHeight="6"
+          orient="auto-start-reverse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-border)" />
         </marker>
       </defs>
 
@@ -63,11 +74,24 @@ export default function MorphologyGraph({ info }: { info: GenotypeInfo }) {
         if (!from || !to) return null;
         return (
           <g key={`e${i}`}>
-            <line x1={from.x} y1={from.y + nodeH / 2} x2={to.x} y2={to.y - nodeH / 2}
-              stroke="#555" strokeWidth="2" markerEnd="url(#arrow)" />
-            <text x={(from.x + to.x) / 2 + 5} y={(from.y + to.y) / 2}
-              fill="#777" fontSize="9">
-              {c.parent_face.replace("Pos", "+").replace("Neg", "-")} {"\u2192"} {c.child_face.replace("Pos", "+").replace("Neg", "-")}
+            <line
+              x1={from.x}
+              y1={from.y + nodeH / 2}
+              x2={to.x}
+              y2={to.y - nodeH / 2}
+              stroke="var(--color-border)"
+              strokeWidth="2"
+              markerEnd="url(#arrow)"
+            />
+            <text
+              x={(from.x + to.x) / 2 + 5}
+              y={(from.y + to.y) / 2}
+              fill="var(--color-text-muted)"
+              fontSize="9"
+            >
+              {c.parent_face.replace("Pos", "+").replace("Neg", "-")}{" "}
+              {"\u2192"}{" "}
+              {c.child_face.replace("Pos", "+").replace("Neg", "-")}
               {c.scale !== 1 ? ` \u00D7${c.scale.toFixed(1)}` : ""}
             </text>
           </g>
@@ -78,19 +102,48 @@ export default function MorphologyGraph({ info }: { info: GenotypeInfo }) {
       {nodes.map((node, i) => {
         const pos = positions[i];
         if (!pos) return null;
-        const dim = node.dimensions.map(d => d.toFixed(2)).join("\u00D7");
+        const dim = node.dimensions.map((d) => d.toFixed(2)).join("\u00D7");
         return (
           <g key={`n${i}`}>
-            <rect x={pos.x - nodeW / 2} y={pos.y - nodeH / 2} width={nodeW} height={nodeH}
-              rx="6" fill={i === 0 ? "#2e4a3e" : "#2a2a3e"} stroke={i === 0 ? "#4caf50" : "#555"} strokeWidth="1.5" />
-            <text x={pos.x} y={pos.y - 10} fill="#e0e0e0" fontSize="12" textAnchor="middle" fontWeight="600">
+            <rect
+              x={pos.x - nodeW / 2}
+              y={pos.y - nodeH / 2}
+              width={nodeW}
+              height={nodeH}
+              rx="6"
+              fill={i === 0 ? "var(--color-success)" : "var(--color-bg-elevated)"}
+              fillOpacity={i === 0 ? 0.2 : 1}
+              stroke={i === 0 ? "var(--color-success)" : "var(--color-border)"}
+              strokeWidth="1.5"
+            />
+            <text
+              x={pos.x}
+              y={pos.y - 10}
+              fill="var(--color-text-primary)"
+              fontSize="12"
+              textAnchor="middle"
+              fontWeight="600"
+            >
               {i === 0 ? "Root" : `Part ${i}`}
             </text>
-            <text x={pos.x} y={pos.y + 5} fill="#999" fontSize="10" textAnchor="middle">
+            <text
+              x={pos.x}
+              y={pos.y + 5}
+              fill="var(--color-text-secondary)"
+              fontSize="10"
+              textAnchor="middle"
+            >
               {dim}
             </text>
-            <text x={pos.x} y={pos.y + 18} fill="#888" fontSize="9" textAnchor="middle">
-              {node.joint_type} · {node.brain.num_neurons}N {node.brain.num_effectors}E
+            <text
+              x={pos.x}
+              y={pos.y + 18}
+              fill="var(--color-text-muted)"
+              fontSize="9"
+              textAnchor="middle"
+            >
+              {node.joint_type} · {node.brain.num_neurons}N{" "}
+              {node.brain.num_effectors}E
             </text>
           </g>
         );

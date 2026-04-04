@@ -26,50 +26,60 @@ export default function App() {
     })();
   }, []);
 
+  const showCanvas = route.path === "viewer" || route.path === "creature";
+
   return (
-    <div className="app">
-      <nav className="nav">
-        <a
-          href="/"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate("/");
-          }}
-          className="nav-brand"
-        >
-          Evolving Virtual Creatures
-        </a>
-        <div className="nav-links">
+    <div className="min-h-screen bg-bg-base text-text-primary">
+      {/* Header */}
+      <header className="bg-bg-header border-b border-border sticky top-0 z-50">
+        <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
           <a
             href="/"
             onClick={(e) => {
               e.preventDefault();
               navigate("/");
             }}
-            className={
-              route.path === "home" ||
-              route.path === "evolution" ||
-              route.path === "creature"
-                ? "active"
-                : ""
-            }
+            className="text-lg font-semibold text-text-primary hover:text-accent transition-colors"
           >
-            Dashboard
+            Evolving Virtual Creatures
           </a>
-          <a
-            href="/viewer"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/viewer");
-            }}
-            className={route.path === "viewer" ? "active" : ""}
-          >
-            Viewer
-          </a>
+          <nav className="flex gap-1">
+            <a
+              href="/"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/");
+              }}
+              className={`px-4 py-2 rounded-md text-sm transition-colors ${
+                route.path === "home" ||
+                route.path === "evolution" ||
+                route.path === "creature"
+                  ? "bg-bg-elevated text-text-primary"
+                  : "text-text-secondary hover:text-text-primary hover:bg-bg-surface"
+              }`}
+            >
+              Dashboard
+            </a>
+            <a
+              href="/viewer"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/viewer");
+              }}
+              className={`px-4 py-2 rounded-md text-sm transition-colors ${
+                route.path === "viewer"
+                  ? "bg-bg-elevated text-text-primary"
+                  : "text-text-secondary hover:text-text-primary hover:bg-bg-surface"
+              }`}
+            >
+              Viewer
+            </a>
+          </nav>
         </div>
-      </nav>
+      </header>
 
-      <main className="main">
+      {/* Main content */}
+      <main className="max-w-[1600px] mx-auto px-6 py-6">
         {route.path === "home" && <EvolutionList />}
         {route.path === "evolution" && (
           <EvolutionDetail evoId={Number(route.params.evoId)} />
@@ -78,16 +88,20 @@ export default function App() {
           <CreatureDetail
             evoId={Number(route.params.evoId)}
             creatureId={Number(route.params.creatureId)}
-            canvasVisible={route.path === "creature"}
-            onShowCanvas={() => {}}
           />
         )}
         {route.path === "viewer" && <Viewer ready={ready} />}
       </main>
 
-      {/* Canvas is always in DOM — wgpu renderer is bound to it */}
-      <div style={{ display: (route.path === "viewer" || route.path === "creature") ? "block" : "none" }}>
-        <canvas ref={canvasRef} id="sim-canvas" width={960} height={640} />
+      {/* Canvas always in DOM — wgpu renderer is bound to it */}
+      <div className={showCanvas ? "" : "absolute -left-[9999px]"}>
+        <canvas
+          ref={canvasRef}
+          id="sim-canvas"
+          width={960}
+          height={640}
+          className="border border-border rounded"
+        />
       </div>
     </div>
   );

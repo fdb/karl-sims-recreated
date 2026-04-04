@@ -10,7 +10,11 @@ export default function FitnessChart({
   height = 200,
 }: Props) {
   if (stats.length < 2)
-    return <div className="chart-placeholder">Waiting for data...</div>;
+    return (
+      <div className="text-text-muted italic py-5 text-center text-sm">
+        Waiting for data...
+      </div>
+    );
 
   const padding = { top: 20, right: 20, bottom: 30, left: 50 };
   const w = width - padding.left - padding.right;
@@ -37,28 +41,28 @@ export default function FitnessChart({
     .join(" ");
 
   return (
-    <svg width={width} height={height} className="fitness-chart">
+    <svg width={width} height={height} className="rounded">
       {/* Axes */}
       <line
         x1={padding.left}
         y1={padding.top}
         x2={padding.left}
         y2={padding.top + h}
-        stroke="#555"
+        stroke="var(--color-border)"
       />
       <line
         x1={padding.left}
         y1={padding.top + h}
         x2={padding.left + w}
         y2={padding.top + h}
-        stroke="#555"
+        stroke="var(--color-border)"
       />
 
       {/* Labels */}
       <text
         x={padding.left - 5}
         y={padding.top + 5}
-        fill="#888"
+        fill="var(--color-text-secondary)"
         fontSize="10"
         textAnchor="end"
       >
@@ -67,7 +71,7 @@ export default function FitnessChart({
       <text
         x={padding.left - 5}
         y={padding.top + h}
-        fill="#888"
+        fill="var(--color-text-secondary)"
         fontSize="10"
         textAnchor="end"
       >
@@ -76,7 +80,7 @@ export default function FitnessChart({
       <text
         x={padding.left + w}
         y={padding.top + h + 15}
-        fill="#888"
+        fill="var(--color-text-secondary)"
         fontSize="10"
         textAnchor="end"
       >
@@ -84,11 +88,16 @@ export default function FitnessChart({
       </text>
 
       {/* Lines */}
-      <path d={bestPath} fill="none" stroke="#4caf50" strokeWidth="2" />
+      <path
+        d={bestPath}
+        fill="none"
+        stroke="var(--color-chart-best)"
+        strokeWidth="2"
+      />
       <path
         d={avgPath}
         fill="none"
-        stroke="#ff9800"
+        stroke="var(--color-chart-avg)"
         strokeWidth="1.5"
         strokeDasharray="4,4"
       />
@@ -99,10 +108,15 @@ export default function FitnessChart({
         y1={10}
         x2={padding.left + 30}
         y2={10}
-        stroke="#4caf50"
+        stroke="var(--color-chart-best)"
         strokeWidth="2"
       />
-      <text x={padding.left + 35} y={14} fill="#4caf50" fontSize="11">
+      <text
+        x={padding.left + 35}
+        y={14}
+        fill="var(--color-chart-best)"
+        fontSize="11"
+      >
         Best
       </text>
       <line
@@ -110,11 +124,16 @@ export default function FitnessChart({
         y1={10}
         x2={padding.left + 100}
         y2={10}
-        stroke="#ff9800"
+        stroke="var(--color-chart-avg)"
         strokeWidth="1.5"
         strokeDasharray="4,4"
       />
-      <text x={padding.left + 105} y={14} fill="#ff9800" fontSize="11">
+      <text
+        x={padding.left + 105}
+        y={14}
+        fill="var(--color-chart-avg)"
+        fontSize="11"
+      >
         Avg
       </text>
     </svg>
