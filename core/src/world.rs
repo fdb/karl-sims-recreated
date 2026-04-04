@@ -74,6 +74,7 @@ pub struct World {
     pub water_enabled: bool,
     pub water_viscosity: f64,
     pub collisions_enabled: bool,
+    pub ground_enabled: bool,
     suggested_dt: f64,
     pub root_velocity: DVec3,
     pub root_angular_velocity: DVec3,
@@ -94,6 +95,7 @@ impl World {
             water_enabled: false,
             water_viscosity: crate::water::DEFAULT_VISCOSITY,
             collisions_enabled: false,
+            ground_enabled: false,
             suggested_dt: 1.0 / 120.0,
             root_velocity: DVec3::ZERO,
             root_angular_velocity: DVec3::ZERO,
@@ -214,7 +216,7 @@ impl World {
             }
         }
 
-        // Compute collision forces
+        // Compute collision forces (body-body)
         if self.collisions_enabled {
             let contacts = crate::collision::detect_collisions(
                 &self.bodies,
@@ -231,6 +233,29 @@ impl World {
                     crate::collision::COLLISION_DAMPING,
                 );
                 for (i, f) in col_forces.into_iter().enumerate() {
+                    if i < ext_forces.len() {
+                        ext_forces[i] = ext_forces[i] + f;
+                    }
+                }
+            }
+        }
+
+        // Ground plane collision (y=0)
+        if self.ground_enabled {
+            let ground_contacts = crate::collision::detect_ground_collisions(
+                &self.bodies,
+                &self.transforms,
+            );
+            if !ground_contacts.is_empty() {
+                let ground_forces = crate::collision::compute_ground_forces(
+                    &ground_contacts,
+                    &self.transforms,
+                    body_vels,
+                    self.bodies.len(),
+                    crate::collision::COLLISION_STIFFNESS * 2.0, // stiffer for ground
+                    crate::collision::COLLISION_DAMPING * 2.0,
+                );
+                for (i, f) in ground_forces.into_iter().enumerate() {
                     if i < ext_forces.len() {
                         ext_forces[i] = ext_forces[i] + f;
                     }

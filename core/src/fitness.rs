@@ -60,6 +60,12 @@ pub fn evaluate_fitness(genome: &GenomeGraph, params: &EvolutionParams) -> Fitne
             creature.world.water_enabled = false;
             creature.world.gravity = DVec3::new(0.0, -9.81, 0.0);
             creature.world.collisions_enabled = true;
+            creature.world.ground_enabled = true;
+            // Position root above ground
+            creature.world.set_root_transform(
+                glam::DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)),
+            );
+            creature.world.forward_kinematics();
         }
     }
 

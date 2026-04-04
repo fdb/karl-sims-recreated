@@ -129,6 +129,87 @@ pub fn obb_sat(
     })
 }
 
+/// Detect collisions between bodies and a ground plane at y=0.
+/// Returns contacts where the normal points up (Y+) and depth is how far below ground.
+pub fn detect_ground_collisions(
+    bodies: &[RigidBody],
+    transforms: &[DAffine3],
+) -> Vec<Contact> {
+    let mut contacts = Vec::new();
+
+    for (i, (body, tf)) in bodies.iter().zip(transforms).enumerate() {
+        let rot = tf.matrix3;
+        let center = tf.translation;
+
+        // Check all 8 corners of the OBB against the ground plane (y=0)
+        let he = body.half_extents;
+        let corners = [
+            DVec3::new(-he.x, -he.y, -he.z),
+            DVec3::new( he.x, -he.y, -he.z),
+            DVec3::new(-he.x,  he.y, -he.z),
+            DVec3::new( he.x,  he.y, -he.z),
+            DVec3::new(-he.x, -he.y,  he.z),
+            DVec3::new( he.x, -he.y,  he.z),
+            DVec3::new(-he.x,  he.y,  he.z),
+            DVec3::new( he.x,  he.y,  he.z),
+        ];
+
+        let mut deepest_y = f64::MAX;
+        let mut deepest_point = DVec3::ZERO;
+
+        for corner_local in &corners {
+            let corner_world = center + rot * *corner_local;
+            if corner_world.y < deepest_y {
+                deepest_y = corner_world.y;
+                deepest_point = corner_world;
+            }
+        }
+
+        if deepest_y < 0.0 {
+            contacts.push(Contact {
+                body_a: i,
+                body_b: usize::MAX, // sentinel: ground
+                normal: DVec3::Y,   // push up
+                depth: -deepest_y,
+                point: deepest_point,
+            });
+        }
+    }
+
+    contacts
+}
+
+/// Compute penalty forces from ground contacts (only applies to body_a).
+pub fn compute_ground_forces(
+    contacts: &[Contact],
+    transforms: &[DAffine3],
+    body_velocities: &[SVec6],
+    num_bodies: usize,
+    stiffness: f64,
+    damping: f64,
+) -> Vec<SVec6> {
+    let mut forces = vec![SVec6::ZERO; num_bodies];
+
+    for contact in contacts {
+        let a = contact.body_a;
+        if a >= num_bodies { continue; }
+
+        let vel_a = body_velocities.get(a).map(|v| v.linear()).unwrap_or(DVec3::ZERO);
+        let vel_normal = vel_a.dot(contact.normal);
+
+        let force_mag = (stiffness * contact.depth - damping * vel_normal).max(0.0);
+        let force_world = contact.normal * force_mag;
+
+        let r = contact.point - transforms[a].translation;
+        let torque_world = r.cross(force_world);
+        let rot_inv = transforms[a].matrix3.transpose();
+
+        forces[a] = forces[a] + SVec6::new(rot_inv * torque_world, rot_inv * force_world);
+    }
+
+    forces
+}
+
 /// All-pairs collision detection with AABB broad phase and OBB-SAT narrow phase.
 /// Skips pairs connected by joints (parent-child).
 pub fn detect_collisions(
