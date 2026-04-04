@@ -9,7 +9,6 @@ interface Props {
 
 export default function CreatureViewer({ genomeBytes }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  // Keep refs so the cleanup closure can access latest values
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
     animId: number;
@@ -25,76 +24,62 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       await initWasm();
       if (cancelled) return;
 
-      // --- Three.js scene setup ---
+      // --- Three.js scene ---
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x1a2a30);
       scene.fog = new THREE.Fog(0x1a2a30, 12, 40);
 
-      const camera = new THREE.PerspectiveCamera(
-        45,
-        mount.clientWidth / mount.clientHeight,
-        0.01,
-        100
-      );
+      const w = mount.clientWidth || 400;
+      const h = mount.clientHeight || 300;
+      const camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
       camera.position.set(3, 2.5, 5);
-      camera.lookAt(0, 0, 0);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(window.devicePixelRatio);
-      renderer.setSize(mount.clientWidth, mount.clientHeight);
+      renderer.setSize(w, h);
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       mount.appendChild(renderer.domElement);
 
-      // Orbit controls (handles mouse + touch)
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
-      controls.minDistance = 0.5;
-      controls.maxDistance = 30;
+      controls.minDistance = 0.3;
+      controls.maxDistance = 50;
 
       // Lighting
-      const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-      scene.add(ambient);
-
+      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
       const sun = new THREE.DirectionalLight(0xfff5e0, 1.2);
       sun.position.set(4, 8, 5);
       sun.castShadow = true;
       sun.shadow.mapSize.set(1024, 1024);
       sun.shadow.camera.near = 0.1;
-      sun.shadow.camera.far = 50;
-      sun.shadow.camera.left = -10;
-      sun.shadow.camera.right = 10;
-      sun.shadow.camera.top = 10;
-      sun.shadow.camera.bottom = -10;
+      sun.shadow.camera.far = 80;
+      sun.shadow.camera.left = -20;
+      sun.shadow.camera.right = 20;
+      sun.shadow.camera.top = 20;
+      sun.shadow.camera.bottom = -20;
       scene.add(sun);
-
       const fill = new THREE.DirectionalLight(0x8ab4c0, 0.3);
       fill.position.set(-3, 2, -4);
       scene.add(fill);
 
-      // Ground plane (checkered texture)
-      const groundSize = 40;
+      // Ground plane (checkered)
       const checkerCanvas = document.createElement("canvas");
       checkerCanvas.width = 256;
       checkerCanvas.height = 256;
       const ctx = checkerCanvas.getContext("2d")!;
-      const tileCount = 8;
-      const tileSize = 256 / tileCount;
-      for (let row = 0; row < tileCount; row++) {
-        for (let col = 0; col < tileCount; col++) {
-          ctx.fillStyle = (row + col) % 2 === 0 ? "#2a3d44" : "#243540";
-          ctx.fillRect(col * tileSize, row * tileSize, tileSize, tileSize);
+      for (let r = 0; r < 8; r++)
+        for (let c = 0; c < 8; c++) {
+          ctx.fillStyle = (r + c) % 2 === 0 ? "#2a3d44" : "#243540";
+          ctx.fillRect(c * 32, r * 32, 32, 32);
         }
-      }
-      const checkerTex = new THREE.CanvasTexture(checkerCanvas);
-      checkerTex.wrapS = THREE.RepeatWrapping;
-      checkerTex.wrapT = THREE.RepeatWrapping;
-      checkerTex.repeat.set(tileCount, tileCount);
-
+      const tex = new THREE.CanvasTexture(checkerCanvas);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(8, 8);
       const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(groundSize, groundSize),
-        new THREE.MeshLambertMaterial({ map: checkerTex })
+        new THREE.PlaneGeometry(80, 80),
+        new THREE.MeshLambertMaterial({ map: tex })
       );
       ground.rotation.x = -Math.PI / 2;
       ground.position.y = -0.001;
@@ -102,33 +87,64 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       scene.add(ground);
 
       // --- WASM simulation ---
-      const handle = sim_init(genomeBytes);
-      const bodyCount = sim_body_count(handle);
+      let handle;
+      try {
+        handle = sim_init(genomeBytes);
+      } catch (e) {
+        console.error("CreatureViewer: sim_init failed:", e);
+        return;
+      }
 
-      // Create one box mesh per body part
+      const bodyCount = sim_body_count(handle);
+      console.log(`CreatureViewer: bodyCount=${bodyCount}`);
+
       const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0xeae5d9 });
       const meshes: THREE.Mesh[] = [];
       for (let i = 0; i < bodyCount; i++) {
-        // Geometry sized to 1x1x1 — scaled per-frame via half_extents
-        const geo = new THREE.BoxGeometry(1, 1, 1);
-        const mesh = new THREE.Mesh(geo, bodyMaterial);
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), bodyMaterial);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         scene.add(mesh);
         meshes.push(mesh);
       }
 
-      // Apply initial transforms before first frame
-      applyTransforms(sim_step(handle), meshes);
+      // Get first frame of transforms
+      const firstTransforms = sim_step(handle);
+      applyTransforms(firstTransforms, meshes);
+
+      // Auto-fit camera to the creature's bounding box
+      if (meshes.length > 0) {
+        const box = new THREE.Box3();
+        for (const mesh of meshes) box.expandByObject(mesh);
+        if (!box.isEmpty()) {
+          const center = new THREE.Vector3();
+          box.getCenter(center);
+          const size = new THREE.Vector3();
+          box.getSize(size);
+          const maxDim = Math.max(size.x, size.y, size.z, 0.5);
+          const dist = maxDim * 3.5;
+          controls.target.copy(center);
+          camera.position.set(
+            center.x + dist,
+            center.y + dist * 0.6,
+            center.z + dist
+          );
+          camera.lookAt(center);
+          camera.updateProjectionMatrix();
+          console.log(
+            `CreatureViewer: center=(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}) maxDim=${maxDim.toFixed(2)}`
+          );
+        }
+      }
 
       // Resize observer
       const resizeObs = new ResizeObserver(() => {
-        if (!mount) return;
-        const w = mount.clientWidth;
-        const h = mount.clientHeight;
-        camera.aspect = w / h;
+        const rw = mount.clientWidth;
+        const rh = mount.clientHeight;
+        if (rw === 0 || rh === 0) return;
+        camera.aspect = rw / rh;
         camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
+        renderer.setSize(rw, rh);
       });
       resizeObs.observe(mount);
 
@@ -136,13 +152,11 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       let animId: number;
       const animate = () => {
         animId = requestAnimationFrame(animate);
-        const transforms = sim_step(handle);
-        applyTransforms(transforms, meshes);
+        applyTransforms(sim_step(handle), meshes);
         controls.update();
         renderer.render(scene, camera);
       };
       animId = requestAnimationFrame(animate);
-
       stateRef.current = { renderer, animId };
     })();
 
@@ -163,22 +177,11 @@ export default function CreatureViewer({ genomeBytes }: Props) {
 function applyTransforms(data: number[], meshes: THREE.Mesh[]) {
   const STRIDE = 10;
   for (let i = 0; i < meshes.length; i++) {
-    const base = i * STRIDE;
-    const mesh = meshes[i];
-
-    mesh.position.set(data[base], data[base + 1], data[base + 2]);
-    // Quaternion: wasm returns [w, x, y, z], Three.js Quaternion is (x, y, z, w)
-    mesh.quaternion.set(
-      data[base + 4],
-      data[base + 5],
-      data[base + 6],
-      data[base + 3]
-    );
-    // Scale box from unit cube to actual body dimensions (half_extents * 2)
-    mesh.scale.set(
-      data[base + 7] * 2,
-      data[base + 8] * 2,
-      data[base + 9] * 2
-    );
+    const b = i * STRIDE;
+    meshes[i].position.set(data[b], data[b + 1], data[b + 2]);
+    // wasm: [w, x, y, z] → Three.js Quaternion(x, y, z, w)
+    meshes[i].quaternion.set(data[b + 4], data[b + 5], data[b + 6], data[b + 3]);
+    // half_extents × 2 = full box size
+    meshes[i].scale.set(data[b + 7] * 2, data[b + 8] * 2, data[b + 9] * 2);
   }
 }

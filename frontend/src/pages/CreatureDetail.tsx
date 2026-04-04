@@ -86,9 +86,9 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
       {error && <p className="text-danger mb-4">Error: {error}</p>}
 
       {/* Two-column: 3D viewer (large) + genome info (sidebar) */}
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-2">
-          <div className="bg-bg-surface border border-border-subtle rounded-lg overflow-hidden aspect-[3/2] relative">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <div className="bg-bg-surface border border-border-subtle rounded-lg overflow-hidden aspect-[4/3] sm:aspect-[3/2] relative">
             {loading && (
               <div className="absolute inset-0 flex items-center justify-center z-10">
                 <p className="text-text-muted text-sm">Loading creature...</p>
@@ -97,7 +97,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
             {genomeBytes && <CreatureViewer genomeBytes={genomeBytes} />}
           </div>
         </div>
-        <div className="col-span-1 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
+        <div className="lg:col-span-1 space-y-4 lg:overflow-y-auto lg:max-h-[calc(100vh-200px)]">
           {info && (
             <>
               <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">

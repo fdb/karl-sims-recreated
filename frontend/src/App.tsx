@@ -20,9 +20,10 @@ export default function App() {
               e.preventDefault();
               navigate("/");
             }}
-            className="text-lg font-semibold text-text-primary hover:text-accent transition-colors"
+            className="text-base sm:text-lg font-semibold text-text-primary hover:text-accent transition-colors truncate"
           >
-            Evolving Virtual Creatures
+            <span className="hidden sm:inline">Evolving Virtual Creatures</span>
+            <span className="sm:hidden">Virtual Creatures</span>
           </a>
           <nav className="flex gap-1">
             <a

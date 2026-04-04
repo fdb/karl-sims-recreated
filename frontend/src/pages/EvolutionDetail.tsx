@@ -83,7 +83,7 @@ export default function EvolutionDetail({ evoId }: Props) {
       </div>
 
       {/* Header with actions */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Evolution #{evoId}</h1>
           {evolution && <StatusBadge status={evolution.status} />}
@@ -109,7 +109,7 @@ export default function EvolutionDetail({ evoId }: Props) {
       </div>
 
       {evolution && (
-        <div className="flex gap-6 text-sm text-text-secondary mb-6">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-secondary mb-6">
           <span>Generation {evolution.generation}</span>
           {evolution.config && (
             <>
@@ -133,8 +133,8 @@ export default function EvolutionDetail({ evoId }: Props) {
       )}
 
       {/* Two-column layout: chart left, creatures right */}
-      <div className="grid grid-cols-5 gap-6">
-        <div className="col-span-3">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="lg:col-span-3">
           <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
             <h2 className="text-sm font-medium text-text-secondary mb-3">
               Fitness Over Generations
@@ -142,7 +142,7 @@ export default function EvolutionDetail({ evoId }: Props) {
             <FitnessChart stats={chartStats} width={700} height={250} />
           </div>
         </div>
-        <div className="col-span-2">
+        <div className="lg:col-span-2">
           <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
             <h2 className="text-sm font-medium text-text-secondary mb-3">
               Best Creatures
