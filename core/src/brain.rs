@@ -201,8 +201,12 @@ impl BrainInstance {
                 .iter()
                 .map(|(inp, weight)| {
                     let val = match inp {
-                        RemappedInput::Neuron(idx) => self.prev_outputs.get(*idx).copied().unwrap_or(0.0),
-                        RemappedInput::Sensor(idx) => self.sensors.get(*idx).copied().unwrap_or(0.0),
+                        RemappedInput::Neuron(idx) => {
+                            self.prev_outputs.get(*idx).copied().unwrap_or(0.0)
+                        }
+                        RemappedInput::Sensor(idx) => {
+                            self.sensors.get(*idx).copied().unwrap_or(0.0)
+                        }
                         RemappedInput::Constant(v) => *v,
                     };
                     val * weight
