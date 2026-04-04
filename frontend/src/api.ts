@@ -67,6 +67,19 @@ export async function getBestCreatures(
   return res.json();
 }
 
+export async function getEvolutionStats(
+  evoId: number,
+): Promise<GenerationStats[]> {
+  const res = await fetch(`${API_BASE}/api/evolutions/${evoId}/stats`);
+  const data = await res.json();
+  return data.map((d: { generation: number; best_fitness: number; avg_fitness: number }) => ({
+    evolution_id: evoId,
+    generation: d.generation,
+    best_fitness: d.best_fitness,
+    avg_fitness: d.avg_fitness,
+  }));
+}
+
 export async function stopEvolution(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}/stop`, { method: "POST" });
 }

@@ -22,6 +22,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
+  const genomeBytesRef = useRef<Uint8Array | null>(null);
 
   // Reparent the canvas into the viewer container
   useEffect(() => {
@@ -62,7 +63,9 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
         setInfo(genoInfo);
 
         const bytes = await getGenomeBytes(creatureId);
-        load_creature_from_bytes(new Uint8Array(bytes));
+        const genomeBytes = new Uint8Array(bytes);
+        genomeBytesRef.current = genomeBytes;
+        load_creature_from_bytes(genomeBytes);
       } catch (e) {
         setError(String(e));
       } finally {
@@ -106,6 +109,18 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
           <span className="text-success text-lg font-mono">
             Fitness: {creature.fitness.toFixed(4)}
           </span>
+        )}
+        {!loading && genomeBytesRef.current && (
+          <button
+            onClick={() => {
+              if (genomeBytesRef.current) {
+                load_creature_from_bytes(genomeBytesRef.current);
+              }
+            }}
+            className="px-3 py-1.5 text-sm bg-bg-surface border border-border rounded-md hover:bg-bg-elevated transition-colors"
+          >
+            Restart
+          </button>
         )}
       </div>
 

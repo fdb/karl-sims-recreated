@@ -170,6 +170,30 @@ pub fn get_evolution_full(conn: &Connection, evo_id: i64) -> Option<(String, i64
     .ok()
 }
 
+/// Get per-generation stats (best, avg fitness) for an evolution.
+pub fn get_generation_stats(conn: &Connection, evo_id: i64) -> Vec<(i64, f64, f64)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT g.generation, MAX(g.fitness), AVG(g.fitness)
+             FROM genotypes g
+             WHERE g.evolution_id = ?1 AND g.fitness IS NOT NULL
+             GROUP BY g.generation
+             ORDER BY g.generation",
+        )
+        .expect("Failed to prepare get_generation_stats");
+
+    stmt.query_map(params![evo_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, f64>(2)?,
+        ))
+    })
+    .expect("Failed to query generation stats")
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
 /// Get all (genotype_id, fitness) pairs for a given generation.
 pub fn get_generation_fitnesses(conn: &Connection, evo_id: i64, generation: i64) -> Vec<(i64, f64)> {
     let mut stmt = conn

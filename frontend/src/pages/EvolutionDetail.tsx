@@ -5,8 +5,10 @@ import {
   pauseEvolution,
   resumeEvolution,
   getBestCreatures,
+  getEvolutionStats,
   type Evolution,
   type CreatureInfo,
+  type GenerationStats,
 } from "../api";
 import { useEvolutionUpdates } from "../hooks/useWebSocket";
 import { navigate } from "../router";
@@ -20,6 +22,7 @@ interface Props {
 export default function EvolutionDetail({ evoId }: Props) {
   const [evolution, setEvolution] = useState<Evolution | null>(null);
   const [bestCreatures, setBestCreatures] = useState<CreatureInfo[]>([]);
+  const [historicalStats, setHistoricalStats] = useState<GenerationStats[]>([]);
   const liveStats = useEvolutionUpdates();
 
   const refresh = useCallback(async () => {
@@ -27,6 +30,8 @@ export default function EvolutionDetail({ evoId }: Props) {
     setEvolution(evo);
     const best = await getBestCreatures(evoId);
     setBestCreatures(best);
+    const stats = await getEvolutionStats(evoId);
+    setHistoricalStats(stats);
   }, [evoId]);
 
   useEffect(() => {
@@ -50,7 +55,14 @@ export default function EvolutionDetail({ evoId }: Props) {
     refresh();
   };
 
-  const chartStats = liveStats.filter((s) => s.evolution_id === evoId);
+  // Merge historical stats with live WS updates (dedup by generation)
+  const liveForEvo = liveStats.filter((s) => s.evolution_id === evoId);
+  const mergedMap = new Map<number, GenerationStats>();
+  for (const s of historicalStats) mergedMap.set(s.generation, s);
+  for (const s of liveForEvo) mergedMap.set(s.generation, s); // WS overrides
+  const chartStats = Array.from(mergedMap.values()).sort(
+    (a, b) => a.generation - b.generation,
+  );
 
   return (
     <div>

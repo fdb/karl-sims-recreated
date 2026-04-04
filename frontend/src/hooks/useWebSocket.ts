@@ -1,38 +1,62 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { GenerationStats } from "../api";
 
 export function useEvolutionUpdates(): GenerationStats[] {
   const [stats, setStats] = useState<GenerationStats[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const ws = new WebSocket(`ws://localhost:3000/api/live`);
-    wsRef.current = ws;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
 
-    ws.onmessage = (event) => {
+    function connect() {
+      if (closed) return;
       try {
-        const data = JSON.parse(event.data);
-        if (data.type === "generation") {
-          setStats((prev) => [
-            ...prev,
-            {
-              evolution_id: data.evolution_id,
-              generation: data.generation,
-              best_fitness: data.best_fitness,
-              avg_fitness: data.avg_fitness,
-            },
-          ]);
-        }
-      } catch (e) {
-        console.warn("WS parse error:", e);
-      }
-    };
+        ws = new WebSocket("ws://localhost:3000/api/live");
 
-    ws.onerror = () => console.warn("WebSocket error");
-    ws.onclose = () => console.log("WebSocket closed");
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "generation") {
+              setStats((prev) => [
+                ...prev,
+                {
+                  evolution_id: data.evolution_id,
+                  generation: data.generation,
+                  best_fitness: data.best_fitness,
+                  avg_fitness: data.avg_fitness,
+                },
+              ]);
+            }
+          } catch {
+            // ignore parse errors
+          }
+        };
+
+        ws.onclose = () => {
+          if (!closed) {
+            // Reconnect after 3 seconds
+            reconnectTimer = setTimeout(connect, 3000);
+          }
+        };
+
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch {
+        // Connection failed, retry
+        if (!closed) {
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      }
+    }
+
+    connect();
 
     return () => {
-      ws.close();
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
     };
   }, []);
 

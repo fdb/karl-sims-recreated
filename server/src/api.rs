@@ -56,6 +56,10 @@ pub fn routes() -> Router<AppState> {
             "/api/evolutions/{id}/resume",
             axum::routing::post(resume_evolution),
         )
+        .route(
+            "/api/evolutions/{id}/stats",
+            axum::routing::get(get_evolution_stats),
+        )
         .route("/api/genotypes/{id}", axum::routing::get(get_genotype_info))
         .route(
             "/api/genotypes/{id}/genome",
@@ -175,6 +179,26 @@ async fn resume_evolution(
     let conn = state.db.lock().unwrap();
     db::resume_evolution(&conn, id);
     Json(serde_json::json!({"status": "running"}))
+}
+
+async fn get_evolution_stats(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<Vec<serde_json::Value>> {
+    let conn = state.db.lock().unwrap();
+    let stats = db::get_generation_stats(&conn, id);
+    Json(
+        stats
+            .into_iter()
+            .map(|(generation, best, avg)| {
+                serde_json::json!({
+                    "generation": generation,
+                    "best_fitness": best,
+                    "avg_fitness": avg,
+                })
+            })
+            .collect(),
+    )
 }
 
 async fn get_genome_bytes(
