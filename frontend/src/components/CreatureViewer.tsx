@@ -5,13 +5,15 @@ import { initWasm, sim_init, sim_step_accurate, sim_body_count, sim_transforms }
 
 interface Props {
   genomeBytes: Uint8Array;
+  environment?: "Water" | "Land";
 }
 
 const SIM_DURATION = 10.0; // seconds
 const DT = 1.0 / 60.0;
 const TOTAL_FRAMES = Math.round(SIM_DURATION / DT); // 600
+const STRIDE = 10; // values per body: px py pz qw qx qy qz hx hy hz
 
-export default function CreatureViewer({ genomeBytes }: Props) {
+export default function CreatureViewer({ genomeBytes, environment = "Water" }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const animIdRef = useRef<number>(0);
@@ -31,12 +33,10 @@ export default function CreatureViewer({ genomeBytes }: Props) {
   const totalFramesRef = useRef(TOTAL_FRAMES);
   const meshesRef = useRef<THREE.Mesh[]>([]);
 
-  // Keep play ref in sync
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // Seek: set frame from slider
   const seekTo = useCallback((frame: number) => {
     currentFrameRef.current = frame;
     setCurrentFrame(frame);
@@ -57,8 +57,9 @@ export default function CreatureViewer({ genomeBytes }: Props) {
 
       // --- Three.js scene ---
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x1a2a30);
-      scene.fog = new THREE.Fog(0x1a2a30, 12, 40);
+      const bgColor = environment === "Water" ? 0x0d1e2e : 0x1a2a30;
+      scene.background = new THREE.Color(bgColor);
+      scene.fog = new THREE.Fog(bgColor, 15, 50);
 
       const w = mount.clientWidth || 400;
       const h = mount.clientHeight || 300;
@@ -96,28 +97,6 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       fill.position.set(-3, 2, -4);
       scene.add(fill);
 
-      // Ground plane (checkered)
-      const checkerCanvas = document.createElement("canvas");
-      checkerCanvas.width = 256;
-      checkerCanvas.height = 256;
-      const ctx = checkerCanvas.getContext("2d")!;
-      for (let r = 0; r < 8; r++)
-        for (let c = 0; c < 8; c++) {
-          ctx.fillStyle = (r + c) % 2 === 0 ? "#2a3d44" : "#243540";
-          ctx.fillRect(c * 32, r * 32, 32, 32);
-        }
-      const tex = new THREE.CanvasTexture(checkerCanvas);
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(8, 8);
-      const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(80, 80),
-        new THREE.MeshLambertMaterial({ map: tex })
-      );
-      ground.rotation.x = -Math.PI / 2;
-      ground.position.y = -0.001;
-      ground.receiveShadow = true;
-      scene.add(ground);
-
       // --- WASM simulation handle ---
       let handle;
       try {
@@ -128,7 +107,6 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       }
 
       const bodyCount = sim_body_count(handle);
-      console.log(`CreatureViewer: bodyCount=${bodyCount}`);
 
       const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0xeae5d9 });
       const meshes: THREE.Mesh[] = [];
@@ -180,38 +158,86 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       });
       resizeObs.observe(mount);
 
-      // Render the initial frame while pre-computing
       renderer.render(scene, camera);
 
-      // --- Pre-compute all frames asynchronously ---
-      // Store frame 0 (initial) first
+      // --- Pre-compute all frames ---
       const allFrames: Float64Array[] = [initialTransforms.slice()];
       let firstNanFrame: number | null = null;
 
-      // Process frames in batches to avoid blocking the UI
       const BATCH_SIZE = 30;
       for (let start = 0; start < TOTAL_FRAMES; start += BATCH_SIZE) {
         if (cancelled) return;
-
-        // Yield to the event loop between batches
         await new Promise<void>((r) => setTimeout(r, 0));
 
         const end = Math.min(start + BATCH_SIZE, TOTAL_FRAMES);
         for (let i = start; i < end; i++) {
           const t = sim_step_accurate(handle);
           const hasNaN = someNotFinite(t);
-          if (hasNaN && firstNanFrame === null) {
-            firstNanFrame = i + 1;
-          }
+          if (hasNaN && firstNanFrame === null) firstNanFrame = i + 1;
           allFrames.push(hasNaN ? allFrames[allFrames.length - 1] : t.slice());
         }
 
-        setProgress((end) / TOTAL_FRAMES);
-        // Render current progress
+        setProgress(end / TOTAL_FRAMES);
         renderer.render(scene, camera);
       }
 
       if (cancelled) return;
+
+      // --- Find the minimum Y extent across all frames (bottom of lowest body part) ---
+      // This gives us where to place the floor so the creature never clips below it.
+      let minBodyY = Infinity;
+      for (const frame of allFrames) {
+        for (let i = 0; i < bodyCount; i++) {
+          const b = i * STRIDE;
+          const posY = frame[b + 1]; // py
+          const hy   = frame[b + 8]; // half-height
+          if (isFinite(posY) && isFinite(hy)) {
+            minBodyY = Math.min(minBodyY, posY - hy);
+          }
+        }
+      }
+      if (!isFinite(minBodyY)) minBodyY = -0.5;
+
+      // --- Add floor/water reference plane (after frames are computed) ---
+      if (environment === "Land") {
+        // Checkered floor with good contrast, positioned at the creature's lowest point
+        const floorY = minBodyY - 0.01;
+        const checker = buildCheckerTexture();
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(80, 80),
+          new THREE.MeshLambertMaterial({ map: checker })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = floorY;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grid lines for depth perception
+        const grid = new THREE.GridHelper(80, 40, 0x4a5a50, 0x3a4a40);
+        grid.position.y = floorY + 0.002;
+        scene.add(grid);
+      } else {
+        // Water: translucent horizontal plane at y=0 as a sea-level reference.
+        // The creature floats freely; the plane is just a visual horizon.
+        const waterY = 0;
+        const waterMat = new THREE.MeshLambertMaterial({
+          color: 0x1a5080,
+          transparent: true,
+          opacity: 0.35,
+          side: THREE.DoubleSide,
+        });
+        const water = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), waterMat);
+        water.rotation.x = -Math.PI / 2;
+        water.position.y = waterY;
+        scene.add(water);
+
+        // Faint grid lines on the water surface
+        const grid = new THREE.GridHelper(80, 40, 0x2a6090, 0x1a4060);
+        (grid.material as THREE.LineBasicMaterial).transparent = true;
+        (grid.material as THREE.LineBasicMaterial).opacity = 0.4;
+        grid.position.y = waterY + 0.01;
+        scene.add(grid);
+      }
 
       framesRef.current = allFrames;
       totalFramesRef.current = allFrames.length;
@@ -219,10 +245,6 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       setIsComputing(false);
       setNanFrame(firstNanFrame);
       setHasNan(firstNanFrame !== null);
-
-      if (firstNanFrame !== null) {
-        console.log(`CreatureViewer: NaN in accurate sim at frame ${firstNanFrame}`);
-      }
 
       // --- Playback animation loop ---
       const animate = () => {
@@ -235,9 +257,7 @@ export default function CreatureViewer({ genomeBytes }: Props) {
         }
 
         const frameData = framesRef.current[currentFrameRef.current];
-        if (frameData) {
-          applyTransforms(frameData, meshes);
-        }
+        if (frameData) applyTransforms(frameData, meshes);
 
         controls.update();
         renderer.render(scene, camera);
@@ -256,7 +276,7 @@ export default function CreatureViewer({ genomeBytes }: Props) {
       framesRef.current = [];
       meshesRef.current = [];
     };
-  }, [genomeBytes]);
+  }, [genomeBytes, environment]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -317,7 +337,6 @@ export default function CreatureViewer({ genomeBytes }: Props) {
             gap: 8,
           }}
         >
-          {/* Play/Pause */}
           <button
             onClick={() => setIsPlaying((p) => !p)}
             style={{
@@ -334,7 +353,6 @@ export default function CreatureViewer({ genomeBytes }: Props) {
             {isPlaying ? "⏸" : "▶"}
           </button>
 
-          {/* Scrubber */}
           <input
             type="range"
             min={0}
@@ -347,12 +365,12 @@ export default function CreatureViewer({ genomeBytes }: Props) {
             style={{ flex: 1, accentColor: "#4a9eca", cursor: "pointer" }}
           />
 
-          {/* Frame counter */}
           <span
             style={{
-              color: hasNan && nanFrame !== null && currentFrame >= nanFrame
-                ? "#f87171"
-                : "#aac",
+              color:
+                hasNan && nanFrame !== null && currentFrame >= nanFrame
+                  ? "#f87171"
+                  : "#aac",
               fontSize: 11,
               fontFamily: "monospace",
               whiteSpace: "nowrap",
@@ -367,8 +385,29 @@ export default function CreatureViewer({ genomeBytes }: Props) {
   );
 }
 
+/** Build a high-contrast checkered canvas texture for the land floor. */
+function buildCheckerTexture(): THREE.CanvasTexture {
+  const size = 512;
+  const tileCount = 8;
+  const tileSize = size / tileCount;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  for (let r = 0; r < tileCount; r++) {
+    for (let c = 0; c < tileCount; c++) {
+      // Alternating warm gray / dark warm gray — much more contrast than before
+      ctx.fillStyle = (r + c) % 2 === 0 ? "#5a5248" : "#2e2b27";
+      ctx.fillRect(c * tileSize, r * tileSize, tileSize, tileSize);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(12, 12);
+  return tex;
+}
+
 function applyTransforms(data: Float64Array, meshes: THREE.Mesh[]) {
-  const STRIDE = 10;
   for (let i = 0; i < meshes.length; i++) {
     const b = i * STRIDE;
     meshes[i].position.set(data[b], data[b + 1], data[b + 2]);

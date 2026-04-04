@@ -3,6 +3,7 @@ import {
   getGenotypeInfo,
   getGenomeBytes,
   getBestCreatures,
+  getEvolution,
   type GenotypeInfo,
   type CreatureInfo,
 } from "../api";
@@ -20,6 +21,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
   const [info, setInfo] = useState<GenotypeInfo | null>(null);
   const [creature, setCreature] = useState<CreatureInfo | null>(null);
   const [genomeBytes, setGenomeBytes] = useState<Uint8Array | null>(null);
+  const [environment, setEnvironment] = useState<"Water" | "Land">("Water");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,14 +30,17 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
       setLoading(true);
       setGenomeBytes(null);
       try {
-        const creatures = await getBestCreatures(evoId);
+        const [creatures, evo, genoInfo, bytes] = await Promise.all([
+          getBestCreatures(evoId),
+          getEvolution(evoId),
+          getGenotypeInfo(creatureId),
+          getGenomeBytes(creatureId),
+        ]);
+
         const c = creatures.find((c) => c.id === creatureId);
         if (c) setCreature(c);
-
-        const genoInfo = await getGenotypeInfo(creatureId);
+        if (evo.config?.environment) setEnvironment(evo.config.environment);
         setInfo(genoInfo);
-
-        const bytes = await getGenomeBytes(creatureId);
         setGenomeBytes(new Uint8Array(bytes));
       } catch (e) {
         setError(String(e));
@@ -94,7 +99,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
                 <p className="text-text-muted text-sm">Loading creature...</p>
               </div>
             )}
-            {genomeBytes && <CreatureViewer genomeBytes={genomeBytes} />}
+            {genomeBytes && <CreatureViewer genomeBytes={genomeBytes} environment={environment} />}
           </div>
         </div>
         <div className="lg:col-span-1 space-y-4 lg:overflow-y-auto lg:max-h-[calc(100vh-200px)]">
