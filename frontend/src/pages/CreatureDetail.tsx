@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getGenotypeInfo,
   getGenomeBytes,
@@ -7,7 +7,7 @@ import {
   type CreatureInfo,
 } from "../api";
 import { navigate } from "../router";
-import { load_creature_from_bytes } from "../wasm";
+import { load_creature_from_bytes, clear_scene } from "../wasm";
 import MorphologyGraph from "../components/MorphologyGraph";
 import BrainGraph from "../components/BrainGraph";
 
@@ -21,21 +21,46 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
   const [creature, setCreature] = useState<CreatureInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
 
+  // Reparent the canvas into the viewer container
+  useEffect(() => {
+    const canvas = document.getElementById("sim-canvas");
+    const container = viewerRef.current;
+    if (!canvas || !container) return;
+
+    // Clear scene first (show empty background while loading)
+    clear_scene();
+
+    // Move canvas into viewer container
+    const originalParent = canvas.parentElement;
+    container.appendChild(canvas);
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.borderRadius = "0.375rem";
+
+    return () => {
+      // Move canvas back when leaving this page
+      if (originalParent) {
+        originalParent.appendChild(canvas);
+        canvas.style.width = "";
+        canvas.style.height = "";
+      }
+    };
+  }, []);
+
+  // Load creature data
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        // Get creature fitness info
         const creatures = await getBestCreatures(evoId);
         const c = creatures.find((c) => c.id === creatureId);
         if (c) setCreature(c);
 
-        // Get genotype structure for visualization
         const genoInfo = await getGenotypeInfo(creatureId);
         setInfo(genoInfo);
 
-        // Load genome bytes into WASM for 3D rendering
         const bytes = await getGenomeBytes(creatureId);
         load_creature_from_bytes(new Uint8Array(bytes));
       } catch (e) {
@@ -56,7 +81,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
             e.preventDefault();
             navigate("/");
           }}
-          className="hover:text-text-secondary transition-colors no-underline text-inherit"
+          className="hover:text-text-secondary transition-colors"
         >
           Dashboard
         </a>
@@ -67,7 +92,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
             e.preventDefault();
             navigate(`/evolutions/${evoId}`);
           }}
-          className="hover:text-text-secondary transition-colors no-underline text-inherit"
+          className="hover:text-text-secondary transition-colors"
         >
           Evolution #{evoId}
         </a>
@@ -84,19 +109,23 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
         )}
       </div>
 
-      {loading && (
-        <p className="text-text-muted">Loading creature...</p>
-      )}
-      {error && <p className="text-danger">Error: {error}</p>}
+      {error && <p className="text-danger mb-4">Error: {error}</p>}
 
       {/* Two-column: 3D viewer (large) + genome info (sidebar) */}
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2">
-          <div className="bg-bg-surface border border-border-subtle rounded-lg p-2 aspect-[3/2] flex items-center justify-center">
-            <p className="text-text-muted text-sm">3D Viewer</p>
+          <div
+            ref={viewerRef}
+            className="bg-bg-surface border border-border-subtle rounded-lg overflow-hidden aspect-[3/2] relative"
+          >
+            {loading && (
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <p className="text-text-muted text-sm">Loading creature...</p>
+              </div>
+            )}
           </div>
         </div>
-        <div className="col-span-1 space-y-4">
+        <div className="col-span-1 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
           {info && (
             <>
               <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">

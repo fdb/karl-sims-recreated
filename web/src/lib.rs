@@ -216,6 +216,18 @@ pub fn load_creature_from_bytes(genome_bytes: &[u8]) -> Result<(), JsValue> {
     Ok(())
 }
 
+/// Clear the scene — show only the background (no creature, no bodies).
+#[wasm_bindgen]
+pub fn clear_scene() {
+    APP.with(|a| {
+        if let Some(ref mut state) = *a.borrow_mut() {
+            state.creature = None;
+            state.world = World::new();
+            state.scene_id = SceneId::SingleBox; // placeholder, but world is empty
+        }
+    });
+}
+
 #[wasm_bindgen]
 pub fn reset_scene() {
     APP.with(|a| {

@@ -82,52 +82,28 @@ export default function EvolutionList() {
             </span>
             <div className="ml-auto flex gap-2">
               {evo.status === "running" && (
-                <>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      handlePause(evo.id);
-                    }}
-                    className="px-3 py-1 text-xs bg-warning/20 text-warning rounded hover:bg-warning/30 transition-colors"
-                  >
-                    Pause
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      handleStop(evo.id);
-                    }}
-                    className="px-3 py-1 text-xs bg-danger/20 text-danger rounded hover:bg-danger/30 transition-colors"
-                  >
-                    Stop
-                  </button>
-                </>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handlePause(evo.id);
+                  }}
+                  className="px-3 py-1 text-xs bg-warning/20 text-warning rounded hover:bg-warning/30 transition-colors"
+                >
+                  Pause
+                </button>
               )}
               {evo.status === "paused" && (
-                <>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      handleResume(evo.id);
-                    }}
-                    className="px-3 py-1 text-xs bg-success/20 text-success rounded hover:bg-success/30 transition-colors"
-                  >
-                    Resume
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      handleStop(evo.id);
-                    }}
-                    className="px-3 py-1 text-xs bg-danger/20 text-danger rounded hover:bg-danger/30 transition-colors"
-                  >
-                    Stop
-                  </button>
-                </>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleResume(evo.id);
+                  }}
+                  className="px-3 py-1 text-xs bg-success/20 text-success rounded hover:bg-success/30 transition-colors"
+                >
+                  Resume
+                </button>
               )}
             </div>
           </a>

@@ -78,36 +78,20 @@ export default function EvolutionDetail({ evoId }: Props) {
         </div>
         <div className="flex gap-2">
           {evolution?.status === "running" && (
-            <>
-              <button
-                onClick={handlePause}
-                className="px-4 py-1.5 text-sm bg-warning/20 text-warning rounded-md hover:bg-warning/30 transition-colors"
-              >
-                Pause
-              </button>
-              <button
-                onClick={handleStop}
-                className="px-4 py-1.5 text-sm bg-danger/20 text-danger rounded-md hover:bg-danger/30 transition-colors"
-              >
-                Stop
-              </button>
-            </>
+            <button
+              onClick={handlePause}
+              className="px-4 py-1.5 text-sm bg-warning/20 text-warning rounded-md hover:bg-warning/30 transition-colors"
+            >
+              Pause
+            </button>
           )}
           {evolution?.status === "paused" && (
-            <>
-              <button
-                onClick={handleResume}
-                className="px-4 py-1.5 text-sm bg-success/20 text-success rounded-md hover:bg-success/30 transition-colors"
-              >
-                Resume
-              </button>
-              <button
-                onClick={handleStop}
-                className="px-4 py-1.5 text-sm bg-danger/20 text-danger rounded-md hover:bg-danger/30 transition-colors"
-              >
-                Stop
-              </button>
-            </>
+            <button
+              onClick={handleResume}
+              className="px-4 py-1.5 text-sm bg-success/20 text-success rounded-md hover:bg-success/30 transition-colors"
+            >
+              Resume
+            </button>
           )}
         </div>
       </div>
