@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from "react";
-import { initWasm, create_renderer, set_rendering_active } from "./wasm";
 import { useRoute } from "./hooks/useRoute";
 import { navigate } from "./router";
 import EvolutionList from "./pages/EvolutionList";
@@ -10,30 +8,6 @@ import "./App.css";
 
 export default function App() {
   const route = useRoute();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const initedRef = useRef(false);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    if (initedRef.current) return;
-    initedRef.current = true;
-
-    (async () => {
-      await initWasm();
-      await create_renderer("sim-canvas");
-      console.log("Renderer created");
-      setReady(true);
-    })();
-  }, []);
-
-  const showCanvas = route.path === "viewer" || route.path === "creature";
-
-  // Pause rendering when canvas is not visible — saves CPU
-  useEffect(() => {
-    if (ready) {
-      set_rendering_active(showCanvas);
-    }
-  }, [showCanvas, ready]);
 
   return (
     <div className="min-h-screen bg-bg-base text-text-primary">
@@ -97,19 +71,8 @@ export default function App() {
             creatureId={Number(route.params.creatureId)}
           />
         )}
-        {route.path === "viewer" && <Viewer ready={ready} />}
+        {route.path === "viewer" && <Viewer />}
       </main>
-
-      {/* Canvas always in DOM — wgpu renderer is bound to it */}
-      <div className={showCanvas ? "" : "absolute -left-[9999px]"}>
-        <canvas
-          ref={canvasRef}
-          id="sim-canvas"
-          width={960}
-          height={640}
-          className="border border-border rounded"
-        />
-      </div>
     </div>
   );
 }

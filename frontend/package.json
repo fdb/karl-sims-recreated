@@ -11,10 +11,12 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@types/three": "^0.183.1",
     "karl-sims-web": "file:../web/pkg",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwindcss": "^4.2.2"
+    "tailwindcss": "^4.2.2",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
