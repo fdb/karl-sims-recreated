@@ -32,7 +32,6 @@ pub struct FJoint {
 pub struct FeatherstoneState {
     // Tree structure
     body_inertias: Vec<SMat6>,
-    parents: Vec<Option<usize>>,
     fjoints: Vec<FJoint>,
     num_real_bodies: usize,
     // Per-body workspace
@@ -60,7 +59,6 @@ impl FeatherstoneState {
 
         // Start with real bodies
         let mut body_inertias: Vec<SMat6> = bodies.iter().map(|b| b.spatial_inertia()).collect();
-        let mut parents: Vec<Option<usize>> = vec![None; num_real_bodies];
         let mut fjoints: Vec<FJoint> = Vec::new();
 
         for (ji, joint) in joints.iter().enumerate() {
@@ -75,10 +73,8 @@ impl FeatherstoneState {
             match dof {
                 0 => {
                     // Rigid: just set parent, no FJoint
-                    parents[joint.child_idx] = Some(joint.parent_idx);
                 }
                 1 => {
-                    parents[joint.child_idx] = Some(joint.parent_idx);
                     fjoints.push(FJoint {
                         parent_body: joint.parent_idx,
                         child_body: joint.child_idx,
@@ -100,7 +96,6 @@ impl FeatherstoneState {
                     // Create 1 virtual body
                     let vb = body_inertias.len();
                     body_inertias.push(SMat6::ZERO);
-                    parents.push(Some(joint.parent_idx));
 
                     // First FJoint: parent → virtual body
                     // parent_anchor on parent side, child_anchor = ZERO
@@ -123,7 +118,6 @@ impl FeatherstoneState {
 
                     // Second FJoint: virtual body → real child
                     // parent_anchor = ZERO on virtual, child_anchor on real child
-                    parents[joint.child_idx] = Some(vb);
                     fjoints.push(FJoint {
                         parent_body: vb,
                         child_body: joint.child_idx,
@@ -145,11 +139,9 @@ impl FeatherstoneState {
                     // Create 2 virtual bodies
                     let vb1 = body_inertias.len();
                     body_inertias.push(SMat6::ZERO);
-                    parents.push(Some(joint.parent_idx));
 
                     let vb2 = body_inertias.len();
                     body_inertias.push(SMat6::ZERO);
-                    parents.push(Some(vb1));
 
                     // Joint 0: parent → vb1
                     fjoints.push(FJoint {
@@ -188,7 +180,6 @@ impl FeatherstoneState {
                     });
 
                     // Joint 2: vb2 → real child
-                    parents[joint.child_idx] = Some(vb2);
                     fjoints.push(FJoint {
                         parent_body: vb2,
                         child_body: joint.child_idx,
@@ -215,7 +206,6 @@ impl FeatherstoneState {
 
         FeatherstoneState {
             body_inertias,
-            parents,
             fjoints,
             num_real_bodies,
             velocities: vec![SVec6::ZERO; nb],
