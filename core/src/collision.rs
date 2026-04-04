@@ -154,24 +154,32 @@ pub fn detect_ground_collisions(
             DVec3::new( he.x,  he.y,  he.z),
         ];
 
-        let mut deepest_y = f64::MAX;
-        let mut deepest_point = DVec3::ZERO;
+        // Collect all corners that penetrate the ground and use their centroid
+        // as the contact point.  A single-corner heuristic creates a spurious
+        // torque for a flat-bottomed box landing flush on the ground.
+        let mut penetrating_sum = DVec3::ZERO;
+        let mut penetrating_count = 0usize;
+        let mut max_depth: f64 = 0.0;
 
         for corner_local in &corners {
             let corner_world = center + rot * *corner_local;
-            if corner_world.y < deepest_y {
-                deepest_y = corner_world.y;
-                deepest_point = corner_world;
+            if corner_world.y < 0.0 {
+                penetrating_sum += corner_world;
+                penetrating_count += 1;
+                if -corner_world.y > max_depth {
+                    max_depth = -corner_world.y;
+                }
             }
         }
 
-        if deepest_y < 0.0 {
+        if penetrating_count > 0 {
+            let contact_point = penetrating_sum / penetrating_count as f64;
             contacts.push(Contact {
                 body_a: i,
                 body_b: usize::MAX, // sentinel: ground
                 normal: DVec3::Y,   // push up
-                depth: -deepest_y,
-                point: deepest_point,
+                depth: max_depth,
+                point: contact_point,
             });
         }
     }

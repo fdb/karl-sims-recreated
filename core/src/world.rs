@@ -196,7 +196,7 @@ impl World {
         let mut fstate =
             FeatherstoneState::from_world(&self.bodies, &self.joints, &self.torques);
         let mut ext_forces = vec![SVec6::ZERO; self.bodies.len()];
-        let floating = self.water_enabled;
+        let floating = true; // always floating-base so contact forces act on root for land too
         let root_vel = SVec6::new(self.root_angular_velocity, self.root_velocity);
         let _ = fstate.compute_accelerations(self.gravity, &ext_forces, root_vel, floating);
         let body_vels = fstate.body_velocities();
@@ -367,51 +367,55 @@ impl World {
 
     pub fn step(&mut self, frame_dt: f64) {
         let dof_map = self.dof_map();
-        if dof_map.is_empty() {
-            self.time += frame_dt;
-            self.forward_kinematics();
-            return;
-        }
 
-        let config = IntegratorConfig::default();
-        let mut remaining = frame_dt;
-        let mut dt = self.suggested_dt.min(remaining);
+        if !dof_map.is_empty() {
+            let config = IntegratorConfig::default();
+            let mut remaining = frame_dt;
+            let mut dt = self.suggested_dt.min(remaining);
 
-        while remaining > 1e-10 {
-            let step_dt = dt.min(remaining);
-            let base_state = self.get_state(&dof_map);
+            while remaining > 1e-10 {
+                let step_dt = dt.min(remaining);
+                let base_state = self.get_state(&dof_map);
 
-            let (new_state, dt_used, dt_next) =
-                self.rk45_adaptive_step(&base_state, step_dt, &dof_map, &config);
+                let (new_state, dt_used, dt_next) =
+                    self.rk45_adaptive_step(&base_state, step_dt, &dof_map, &config);
 
-            self.set_state(&new_state, &dof_map);
-            remaining -= dt_used;
-            dt = dt_next;
-            self.suggested_dt = dt;
-        }
-
-        // Integrate root body velocity and position for floating base (swimming)
-        if self.water_enabled {
-            let root_accel = self.last_root_accel;
-            // Subtract gravity spatial from root_accel to get actual acceleration
-            // (root_accel includes the gravity trick, so actual = root_accel - gravity_spatial)
-            let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
-            let actual_accel = root_accel - gravity_spatial;
-
-            self.root_velocity += actual_accel.linear() * frame_dt;
-            self.root_angular_velocity += actual_accel.angular() * frame_dt;
-
-            let displacement = self.root_velocity * frame_dt;
-            self.transforms[self.root].translation += displacement;
-
-            // Apply angular velocity to root rotation
-            let ang = self.root_angular_velocity;
-            let ang_mag = ang.length();
-            if ang_mag > 1e-10 {
-                let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * frame_dt);
-                let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
-                self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
+                // If the integrator produced NaN, stop — don't let the adaptive
+                // loop run at min_dt for the rest of the frame (54M sub-steps).
+                let has_nan = new_state.angles.iter().chain(&new_state.velocities)
+                    .any(|v| !v.is_finite());
+                self.set_state(&new_state, &dof_map);
+                remaining -= dt_used;
+                dt = dt_next;
+                self.suggested_dt = dt;
+                if has_nan { break; }
             }
+        } else {
+            // No joints — still evaluate to get root acceleration from gravity/contacts
+            let empty_state = self.get_state(&dof_map);
+            self.evaluate(&empty_state, &dof_map);
+        }
+
+        // Integrate root body for both water and land.
+        // actual_accel = root_accel - gravity_spatial strips the Featherstone gravity trick,
+        // yielding the net force / mass from drag and contact.  Gravity is then re-applied
+        // explicitly so that land creatures fall and water creatures (gravity=0) are unaffected.
+        let root_accel = self.last_root_accel;
+        let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
+        let actual_accel = root_accel - gravity_spatial;
+
+        self.root_velocity += (actual_accel.linear() + self.gravity) * frame_dt;
+        self.root_angular_velocity += actual_accel.angular() * frame_dt;
+
+        let displacement = self.root_velocity * frame_dt;
+        self.transforms[self.root].translation += displacement;
+
+        let ang = self.root_angular_velocity;
+        let ang_mag = ang.length();
+        if ang_mag > 1e-10 {
+            let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * frame_dt);
+            let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
+            self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
         }
 
         self.forward_kinematics();
@@ -423,37 +427,30 @@ impl World {
     /// Less accurate but ~6x faster — suitable for visual preview, not fitness evaluation.
     pub fn step_fast(&mut self, dt: f64) {
         let dof_map = self.dof_map();
-        if dof_map.is_empty() {
-            self.time += dt;
-            self.forward_kinematics();
-            return;
-        }
 
         // Single evaluation: FK → forces → Featherstone → accelerations
         let state = self.get_state(&dof_map);
         let deriv = self.evaluate(&state, &dof_map);
 
-        // Simple semi-implicit Euler
+        // Simple semi-implicit Euler for joint DOFs
         for (idx, &(ji, di)) in dof_map.iter().enumerate() {
             self.joints[ji].velocities[di] += deriv.d_velocities[idx] * dt;
             self.joints[ji].angles[di] += self.joints[ji].velocities[di] * dt;
         }
 
-        // Root body integration for floating base
-        if self.water_enabled {
-            let root_accel = self.last_root_accel;
-            let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
-            let actual_accel = root_accel - gravity_spatial;
-            self.root_velocity += actual_accel.linear() * dt;
-            self.root_angular_velocity += actual_accel.angular() * dt;
-            self.transforms[self.root].translation += self.root_velocity * dt;
-            let ang = self.root_angular_velocity;
-            let ang_mag = ang.length();
-            if ang_mag > 1e-10 {
-                let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * dt);
-                let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
-                self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
-            }
+        // Root body integration for both water and land (same logic as step).
+        let root_accel = self.last_root_accel;
+        let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
+        let actual_accel = root_accel - gravity_spatial;
+        self.root_velocity += (actual_accel.linear() + self.gravity) * dt;
+        self.root_angular_velocity += actual_accel.angular() * dt;
+        self.transforms[self.root].translation += self.root_velocity * dt;
+        let ang = self.root_angular_velocity;
+        let ang_mag = ang.length();
+        if ang_mag > 1e-10 {
+            let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * dt);
+            let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
+            self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
         }
 
         self.forward_kinematics();
