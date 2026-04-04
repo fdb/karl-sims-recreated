@@ -180,6 +180,10 @@ body {
 .status-badge.running { background: #2e7d32; }
 .status-badge.completed { background: #455a64; }
 .status-badge.stopped { background: #d32f2f; }
+.status-badge.paused { background: #f57c00; }
+
+.stop-btn { background: #c62828 !important; }
+.resume-btn { background: #2e7d32 !important; }
 
 .evo-detail { margin-top: 16px; }
 .evo-detail h3, .evo-detail h4 { margin-bottom: 8px; font-weight: 500; }

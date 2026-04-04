@@ -39,13 +39,23 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
 
     let max_generations = 100;
     for cur_gen in 0..max_generations {
-        // Check if the evolution has been stopped externally.
-        {
-            let conn = db.lock().unwrap();
-            if let Some((status, _)) = get_evolution_status(&conn, evo_id) {
-                if status == "stopped" {
-                    break;
+        // Check if the evolution has been stopped or paused.
+        loop {
+            let status = {
+                let conn = db.lock().unwrap();
+                get_evolution_status(&conn, evo_id).map(|(s, _)| s)
+            };
+            match status.as_deref() {
+                Some("stopped") => {
+                    log::info!("Evolution {evo_id} stopped");
+                    return;
                 }
+                Some("paused") => {
+                    // Wait until resumed or stopped
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    continue;
+                }
+                _ => break, // "running" or other — proceed
             }
         }
 

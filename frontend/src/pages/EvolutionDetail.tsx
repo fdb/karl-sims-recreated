@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import {
   getEvolution,
   stopEvolution,
+  pauseEvolution,
+  resumeEvolution,
   getBestCreatures,
   type Evolution,
   type CreatureInfo,
@@ -37,6 +39,16 @@ export default function EvolutionDetail({ evoId }: Props) {
     refresh();
   };
 
+  const handlePause = async () => {
+    await pauseEvolution(evoId);
+    refresh();
+  };
+
+  const handleResume = async () => {
+    await resumeEvolution(evoId);
+    refresh();
+  };
+
   const chartStats = liveStats.filter((s) => s.evolution_id === evoId);
 
   return (
@@ -65,9 +77,16 @@ export default function EvolutionDetail({ evoId }: Props) {
               </span>
             </h2>
             {evolution.status === "running" && (
-              <button className="stop-btn" onClick={handleStop}>
-                Stop
-              </button>
+              <>
+                <button onClick={handlePause}>Pause</button>
+                <button className="stop-btn" onClick={handleStop}>Stop</button>
+              </>
+            )}
+            {evolution.status === "paused" && (
+              <>
+                <button className="resume-btn" onClick={handleResume}>Resume</button>
+                <button className="stop-btn" onClick={handleStop}>Stop</button>
+              </>
             )}
           </div>
 

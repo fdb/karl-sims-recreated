@@ -220,13 +220,31 @@ pub fn update_evolution(conn: &Connection, evo_id: i64, status: &str, generation
     .expect("Failed to update evolution");
 }
 
-/// Stop an evolution.
+/// Stop an evolution permanently.
 pub fn stop_evolution(conn: &Connection, evo_id: i64) {
     conn.execute(
         "UPDATE evolutions SET status='stopped', updated_at=datetime('now') WHERE id=?1",
         params![evo_id],
     )
     .expect("Failed to stop evolution");
+}
+
+/// Pause a running evolution. Workers will stop claiming its tasks.
+pub fn pause_evolution(conn: &Connection, evo_id: i64) {
+    conn.execute(
+        "UPDATE evolutions SET status='paused', updated_at=datetime('now') WHERE id=?1 AND status='running'",
+        params![evo_id],
+    )
+    .expect("Failed to pause evolution");
+}
+
+/// Resume a paused evolution.
+pub fn resume_evolution(conn: &Connection, evo_id: i64) {
+    conn.execute(
+        "UPDATE evolutions SET status='running', updated_at=datetime('now') WHERE id=?1 AND status='paused'",
+        params![evo_id],
+    )
+    .expect("Failed to resume evolution");
 }
 
 /// A row from the evolutions table.

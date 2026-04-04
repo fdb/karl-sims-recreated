@@ -3,6 +3,8 @@ import {
   listEvolutions,
   createEvolution,
   stopEvolution,
+  pauseEvolution,
+  resumeEvolution,
   type Evolution,
 } from "../api";
 import { navigate } from "../router";
@@ -29,6 +31,16 @@ export default function EvolutionList() {
 
   const handleStop = async (id: number) => {
     await stopEvolution(id);
+    refresh();
+  };
+
+  const handlePause = async (id: number) => {
+    await pauseEvolution(id);
+    refresh();
+  };
+
+  const handleResume = async (id: number) => {
+    await resumeEvolution(id);
     refresh();
   };
 
@@ -64,15 +76,51 @@ export default function EvolutionList() {
             <span>Evolution #{evo.id}</span>
             <span>Gen {evo.generation}</span>
             {evo.status === "running" && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  handleStop(evo.id);
-                }}
-              >
-                Stop
-              </button>
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handlePause(evo.id);
+                  }}
+                >
+                  Pause
+                </button>
+                <button
+                  className="stop-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleStop(evo.id);
+                  }}
+                >
+                  Stop
+                </button>
+              </>
+            )}
+            {evo.status === "paused" && (
+              <>
+                <button
+                  className="resume-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleResume(evo.id);
+                  }}
+                >
+                  Resume
+                </button>
+                <button
+                  className="stop-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleStop(evo.id);
+                  }}
+                >
+                  Stop
+                </button>
+              </>
             )}
           </a>
         ))}

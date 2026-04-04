@@ -50,6 +50,14 @@ export async function stopEvolution(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}/stop`, { method: "POST" });
 }
 
+export async function pauseEvolution(id: number): Promise<void> {
+  await fetch(`${API_BASE}/api/evolutions/${id}/pause`, { method: "POST" });
+}
+
+export async function resumeEvolution(id: number): Promise<void> {
+  await fetch(`${API_BASE}/api/evolutions/${id}/resume`, { method: "POST" });
+}
+
 export interface GenotypeInfo {
   id: number;
   num_nodes: number;

@@ -40,6 +40,14 @@ pub fn routes() -> Router<AppState> {
             "/api/evolutions/{id}/stop",
             axum::routing::post(stop_evolution),
         )
+        .route(
+            "/api/evolutions/{id}/pause",
+            axum::routing::post(pause_evolution),
+        )
+        .route(
+            "/api/evolutions/{id}/resume",
+            axum::routing::post(resume_evolution),
+        )
         .route("/api/genotypes/{id}", axum::routing::get(get_genotype_info))
         .route(
             "/api/genotypes/{id}/genome",
@@ -119,6 +127,24 @@ async fn stop_evolution(
     let conn = state.db.lock().unwrap();
     db::stop_evolution(&conn, id);
     Json(serde_json::json!({"status": "stopped"}))
+}
+
+async fn pause_evolution(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    let conn = state.db.lock().unwrap();
+    db::pause_evolution(&conn, id);
+    Json(serde_json::json!({"status": "paused"}))
+}
+
+async fn resume_evolution(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    let conn = state.db.lock().unwrap();
+    db::resume_evolution(&conn, id);
+    Json(serde_json::json!({"status": "running"}))
 }
 
 async fn get_genome_bytes(
