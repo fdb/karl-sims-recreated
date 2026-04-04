@@ -417,6 +417,48 @@ impl World {
         self.forward_kinematics();
         self.time += frame_dt;
     }
+
+    /// Fast single-step integration for browser preview rendering.
+    /// Uses one Featherstone evaluation + simple Euler instead of adaptive RK45.
+    /// Less accurate but ~6x faster — suitable for visual preview, not fitness evaluation.
+    pub fn step_fast(&mut self, dt: f64) {
+        let dof_map = self.dof_map();
+        if dof_map.is_empty() {
+            self.time += dt;
+            self.forward_kinematics();
+            return;
+        }
+
+        // Single evaluation: FK → forces → Featherstone → accelerations
+        let state = self.get_state(&dof_map);
+        let deriv = self.evaluate(&state, &dof_map);
+
+        // Simple semi-implicit Euler
+        for (idx, &(ji, di)) in dof_map.iter().enumerate() {
+            self.joints[ji].velocities[di] += deriv.d_velocities[idx] * dt;
+            self.joints[ji].angles[di] += self.joints[ji].velocities[di] * dt;
+        }
+
+        // Root body integration for floating base
+        if self.water_enabled {
+            let root_accel = self.last_root_accel;
+            let gravity_spatial = SVec6::new(DVec3::ZERO, -self.gravity);
+            let actual_accel = root_accel - gravity_spatial;
+            self.root_velocity += actual_accel.linear() * dt;
+            self.root_angular_velocity += actual_accel.angular() * dt;
+            self.transforms[self.root].translation += self.root_velocity * dt;
+            let ang = self.root_angular_velocity;
+            let ang_mag = ang.length();
+            if ang_mag > 1e-10 {
+                let drot = DQuat::from_axis_angle(ang / ang_mag, ang_mag * dt);
+                let current = DQuat::from_mat3(&self.transforms[self.root].matrix3);
+                self.transforms[self.root].matrix3 = DMat3::from_quat(drot * current);
+            }
+        }
+
+        self.forward_kinematics();
+        self.time += dt;
+    }
 }
 
 #[cfg(test)]

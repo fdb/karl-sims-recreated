@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { initWasm, create_renderer } from "./wasm";
+import { initWasm, create_renderer, set_rendering_active } from "./wasm";
 import { useRoute } from "./hooks/useRoute";
 import { navigate } from "./router";
 import EvolutionList from "./pages/EvolutionList";
@@ -27,6 +27,13 @@ export default function App() {
   }, []);
 
   const showCanvas = route.path === "viewer" || route.path === "creature";
+
+  // Pause rendering when canvas is not visible — saves CPU
+  useEffect(() => {
+    if (ready) {
+      set_rendering_active(showCanvas);
+    }
+  }, [showCanvas, ready]);
 
   return (
     <div className="min-h-screen bg-bg-base text-text-primary">

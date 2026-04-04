@@ -5,6 +5,7 @@ import init, {
   set_paused,
   reset_scene,
   clear_scene,
+  set_rendering_active,
   load_creature_from_bytes,
 } from "karl-sims-web";
 
@@ -16,4 +17,4 @@ export async function initWasm(): Promise<void> {
   initialized = true;
 }
 
-export { create_renderer, renderer_resize, set_scene, set_paused, reset_scene, clear_scene, load_creature_from_bytes };
+export { create_renderer, renderer_resize, set_scene, set_paused, reset_scene, clear_scene, set_rendering_active, load_creature_from_bytes };

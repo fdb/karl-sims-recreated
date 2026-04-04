@@ -26,9 +26,16 @@ impl Creature {
         }
     }
 
+    /// Full-accuracy step (RK45). Used for fitness evaluation.
     pub fn step(&mut self, dt: f64) {
         self.brain.tick(&mut self.world, &self.sensor_map, dt);
         self.world.step(dt);
+    }
+
+    /// Fast step (single Euler). Used for browser preview rendering.
+    pub fn step_fast(&mut self, dt: f64) {
+        self.brain.tick(&mut self.world, &self.sensor_map, dt);
+        self.world.step_fast(dt);
     }
 }
 

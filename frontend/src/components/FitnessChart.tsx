@@ -41,7 +41,7 @@ export default function FitnessChart({
     .join(" ");
 
   return (
-    <svg width={width} height={height} className="rounded">
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full rounded" preserveAspectRatio="xMidYMid meet">
       {/* Axes */}
       <line
         x1={padding.left}

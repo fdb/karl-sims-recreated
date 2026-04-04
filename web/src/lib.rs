@@ -39,6 +39,8 @@ struct AppState {
     creature: Option<Creature>,
     scene_id: SceneId,
     paused: bool,
+    /// When false, the render loop skips rendering entirely (saves CPU when canvas is hidden)
+    rendering_active: bool,
 }
 
 thread_local! {
@@ -86,6 +88,7 @@ pub async fn create_renderer(canvas_id: &str) {
             creature: None,
             scene_id: SceneId::Starfish,
             paused: false,
+            rendering_active: true,
         });
     });
 
@@ -216,6 +219,16 @@ pub fn load_creature_from_bytes(genome_bytes: &[u8]) -> Result<(), JsValue> {
     Ok(())
 }
 
+/// Pause or resume the render loop. When inactive, no GPU work is done.
+#[wasm_bindgen]
+pub fn set_rendering_active(active: bool) {
+    APP.with(|a| {
+        if let Some(ref mut state) = *a.borrow_mut() {
+            state.rendering_active = active;
+        }
+    });
+}
+
 /// Clear the scene — show only the background (no creature, no bodies).
 #[wasm_bindgen]
 pub fn clear_scene() {
@@ -292,6 +305,11 @@ fn build_instances(world: &World) -> Vec<InstanceRaw> {
 }
 
 fn tick(state: &mut AppState, _dt: f64) {
+    // Skip everything when rendering is inactive (canvas hidden)
+    if !state.rendering_active {
+        return;
+    }
+
     // 1. Physics step
     if !state.paused {
         if let Some(ref mut creature) = state.creature {
@@ -301,7 +319,7 @@ fn tick(state: &mut AppState, _dt: f64) {
                 creature.world.light_position =
                     DVec3::new(5.0 * angle.cos(), 0.0, 5.0 * angle.sin());
             }
-            creature.step(1.0 / 60.0);
+            creature.step_fast(1.0 / 60.0);
         } else {
             match state.scene_id {
                 SceneId::SingleBox => {}
@@ -316,7 +334,7 @@ fn tick(state: &mut AppState, _dt: f64) {
                 SceneId::Following => {}       // handled via creature path
                 SceneId::LoadedCreature => {}  // handled via creature path
             }
-            state.world.step(1.0 / 60.0);
+            state.world.step_fast(1.0 / 60.0);
         }
     }
 
