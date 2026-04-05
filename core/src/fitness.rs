@@ -37,15 +37,34 @@ pub struct EvolutionParams {
     /// Water viscosity coefficient (only used for Water environment). Default: 2.0
     #[serde(default = "default_viscosity")]
     pub water_viscosity: f64,
+    /// Maximum plausible per-body angular velocity, in rad/s. A creature is
+    /// rejected (fitness=0) if ANY body exceeds this rate at any frame.
+    ///
+    /// Sims 1994: no angular-velocity rejection. Real physics has no such
+    /// direct cap either — spin rates emerge from joint damping + actuator
+    /// forces + external contacts.
+    /// Our variant: the Rapier PGS solver allows contact-impulse exploits
+    /// that spin small bodies at 50+ rad/s (8+ rev/s), which evolution
+    /// latches onto for unphysical "wing-spinner" gaits. This cap rejects
+    /// such creatures as a selection-pressure signal.
+    /// Default: 20 rad/s (≈ 3.2 rev/s) — allows vigorous tumbling, rejects
+    /// spinning. Set to `None` to disable (paper-faithful).
+    #[serde(default = "default_max_body_angular_velocity")]
+    pub max_body_angular_velocity: Option<f64>,
 }
 
 fn default_gravity() -> f64 { 9.81 }
 fn default_viscosity() -> f64 { 2.0 }
+fn default_max_body_angular_velocity() -> Option<f64> { Some(20.0) }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
         Self {
-            population_size: 50,
+            // Larger population (150) trades ~3× eval cost for substantially
+            // more genetic diversity. With parallel workers and early
+            // termination of non-moving creatures, wall-time per generation
+            // stays low (~1 s on 8-core). Sims 1994 used 300+.
+            population_size: 150,
             max_generations: 100,
             goal: FitnessGoal::SwimmingSpeed,
             environment: Environment::Water,
@@ -53,6 +72,7 @@ impl Default for EvolutionParams {
             max_parts: 20,
             gravity: 9.81,
             water_viscosity: 2.0,
+            max_body_angular_velocity: Some(20.0),
         }
     }
 }
@@ -115,6 +135,15 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     let mut max_displacement: f64 = 0.0;
     let mut prev_pos = initial_pos;
 
+    // Capture initial body rotations for per-frame angular velocity tracking.
+    // (See `max_body_angular_velocity` doc on EvolutionParams.)
+    let mut prev_rotations: Vec<glam::DQuat> = creature
+        .world
+        .transforms
+        .iter()
+        .map(|t| glam::DQuat::from_mat3(&t.matrix3))
+        .collect();
+
     for step in 0..total_steps {
         creature.step(dt);
         let pos = creature.world.transforms[creature.world.root].translation;
@@ -134,8 +163,37 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
         }
         prev_pos = pos;
 
+        // Per-body angular velocity check (configurable, non-paper).
+        if let Some(max_angvel) = params.max_body_angular_velocity {
+            for (i, t) in creature.world.transforms.iter().enumerate() {
+                let cur_q = glam::DQuat::from_mat3(&t.matrix3);
+                // Relative rotation from prev → cur: q_rel = cur * prev^{-1}.
+                let q_rel = cur_q * prev_rotations[i].inverse();
+                // Extract rotation angle: θ = 2·acos(|w|), clamped for
+                // numerical safety against slightly-out-of-range values.
+                let w = q_rel.w.abs().clamp(-1.0, 1.0);
+                let angle = 2.0 * w.acos();
+                let angvel = angle / dt;
+                if angvel > max_angvel {
+                    return FitnessResult {
+                        score: 0.0,
+                        distance: 0.0,
+                        max_displacement: 0.0,
+                        terminated_early: true,
+                    };
+                }
+                prev_rotations[i] = cur_q;
+            }
+        }
+
         max_displacement = max_displacement.max(disp);
-        if step + 1 == early_check_step && disp < 0.01 {
+        // Early-termination: if a creature has not reached 5 cm of peak
+        // displacement from origin in the first 2 s, kill it. We test
+        // max_displacement (not instantaneous disp) so a creature that
+        // tumbles 5 cm away and returns still survives the check — the
+        // point is to cull creatures that never move, not those whose
+        // gait passes through the origin.
+        if step + 1 == early_check_step && max_displacement < 0.05 {
             return FitnessResult {
                 score: 0.0,
                 distance: 0.0,

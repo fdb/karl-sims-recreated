@@ -197,6 +197,33 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             offspring_count += 1;
         }
 
+        // Periodic random injection: every INJECTION_INTERVAL generations,
+        // replace INJECTION_FRACTION of the offspring slots with fresh random
+        // genomes. This breaks selection out of local optima when the elite
+        // has stagnated, without wiping the population. (The survivors from
+        // this gen still persist, so we never lose good individuals.)
+        const INJECTION_INTERVAL: usize = 10;
+        const INJECTION_FRACTION: f64 = 0.10;
+        let inject_count = if next_gen > 0 && next_gen % INJECTION_INTERVAL == 0 {
+            (config.population_size as f64 * INJECTION_FRACTION).round() as usize
+        } else {
+            0
+        };
+        for _ in 0..inject_count {
+            if offspring_count >= config.population_size { break; }
+            let child = GenomeGraph::random(&mut rng);
+            let bytes = bincode::serialize(&child).unwrap();
+            let conn = db.lock().unwrap();
+            let gid = insert_genotype(&conn, evo_id, next_gen as i64, &bytes, None);
+            create_task(&conn, evo_id, gid);
+            offspring_count += 1;
+        }
+        if inject_count > 0 {
+            log::info!(
+                "Evolution {evo_id} Gen {next_gen}: injected {inject_count} random genomes"
+            );
+        }
+
         // Generate new offspring to fill the population.
         while offspring_count < config.population_size {
             let roll: f64 = rng.r#gen();
@@ -234,19 +261,87 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
     log::info!("Evolution {evo_id} completed");
 }
 
-/// Fitness-proportional (roulette-wheel) parent selection.
+const TOURNAMENT_SIZE: usize = 3;
+
+/// Tournament selection: pick TOURNAMENT_SIZE random indices in 0..n,
+/// return the one with the highest fitness. Unlike roulette-wheel, this
+/// does NOT over-amplify a single high-fitness elite: every survivor has
+/// a non-trivial chance of being selected regardless of the elite gap.
+fn tournament_pick<R: Rng>(fitnesses: &[f64], rng: &mut R) -> usize {
+    let n = fitnesses.len();
+    assert!(n > 0, "tournament_pick called with empty fitnesses");
+    let mut best_idx = rng.gen_range(0..n);
+    let mut best_fit = fitnesses[best_idx];
+    for _ in 1..TOURNAMENT_SIZE.min(n) {
+        let candidate = rng.gen_range(0..n);
+        if fitnesses[candidate] > best_fit {
+            best_idx = candidate;
+            best_fit = fitnesses[candidate];
+        }
+    }
+    best_idx
+}
+
+/// Tournament parent selection over parallel (parents, fitnesses) slices.
 fn pick_weighted<'a, R: Rng>(
     parents: &'a [GenomeGraph],
     fitnesses: &[f64],
     rng: &mut R,
 ) -> &'a GenomeGraph {
-    let total: f64 = fitnesses.iter().map(|f| f.max(0.001)).sum();
-    let mut pick = rng.r#gen::<f64>() * total;
-    for (i, &f) in fitnesses.iter().enumerate() {
-        pick -= f.max(0.001);
-        if pick <= 0.0 {
-            return &parents[i];
+    &parents[tournament_pick(fitnesses, rng)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
+
+    #[test]
+    fn tournament_pick_favors_higher_fitness() {
+        // 10 candidates with strictly ascending fitness. Over many draws,
+        // the last (highest) should win far more often than 1/n, and the
+        // first (lowest) should win far less. With TOURNAMENT_SIZE=3, the
+        // top candidate wins with probability ≈ 1 - ((n-1)/n)^3 per draw,
+        // which for n=10 is ~27% — ~2.7× uniform expectation of 10%.
+        let fitnesses: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let trials = 10_000;
+        let mut top_wins = 0;
+        let mut bottom_wins = 0;
+        for _ in 0..trials {
+            let idx = tournament_pick(&fitnesses, &mut rng);
+            if idx == 9 { top_wins += 1; }
+            if idx == 0 { bottom_wins += 1; }
+        }
+        // Top wins ~27%, bottom wins ~0.1% (needs all 3 picks to be index 0).
+        assert!(top_wins > 2000, "top wins {top_wins}, expected >2000");
+        assert!(bottom_wins < 200, "bottom wins {bottom_wins}, expected <200");
+    }
+
+    #[test]
+    fn tournament_pick_uniform_when_all_equal_fitness() {
+        // When fitnesses are all equal, tournament reduces to uniform
+        // random selection (since no candidate wins the > comparison).
+        let fitnesses: Vec<f64> = vec![5.0; 10];
+        let mut rng = ChaCha8Rng::seed_from_u64(2);
+        let mut counts = vec![0usize; 10];
+        for _ in 0..10_000 {
+            counts[tournament_pick(&fitnesses, &mut rng)] += 1;
+        }
+        // Each bucket should land within ±30% of uniform (1000).
+        for (i, &c) in counts.iter().enumerate() {
+            assert!(c > 700 && c < 1300, "bucket {i}: {c} (expected ~1000)");
         }
     }
-    &parents[parents.len() - 1]
+
+    #[test]
+    fn tournament_pick_single_candidate() {
+        // Degenerate: 1 candidate is always picked.
+        let fitnesses = vec![42.0];
+        let mut rng = ChaCha8Rng::seed_from_u64(3);
+        for _ in 0..100 {
+            assert_eq!(tournament_pick(&fitnesses, &mut rng), 0);
+        }
+    }
 }
