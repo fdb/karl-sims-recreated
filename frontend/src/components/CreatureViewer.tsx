@@ -392,13 +392,26 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
               border: "none",
               color: "#ccc",
               cursor: "pointer",
-              fontSize: 14,
               padding: "0 4px",
-              lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
             title={isPlaying ? "Pause" : "Play"}
+            aria-label={isPlaying ? "Pause" : "Play"}
           >
-            {isPlaying ? "⏸" : "▶"}
+            {isPlaying ? (
+              // Pause: two vertical bars
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="3" y="2" width="3.5" height="12" rx="0.5" />
+                <rect x="9.5" y="2" width="3.5" height="12" rx="0.5" />
+              </svg>
+            ) : (
+              // Play: right-pointing triangle
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M4 2 L13 8 L4 14 Z" />
+              </svg>
+            )}
           </button>
 
           <input

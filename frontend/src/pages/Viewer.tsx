@@ -202,15 +202,29 @@ export default function Viewer() {
       <div className="flex items-center gap-3 mb-4">
         <button
           onClick={() => setPaused(p => !p)}
-          className="px-3 py-1.5 text-sm rounded-md border border-border bg-bg-surface text-text-primary hover:border-accent transition-colors"
+          className="px-3 py-1.5 text-sm rounded-md border border-border bg-bg-surface text-text-primary hover:border-accent transition-colors inline-flex items-center gap-2"
         >
-          {paused ? "▶ Play" : "⏸ Pause"}
+          {paused ? (
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4 2 L13 8 L4 14 Z" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="3" y="2" width="3.5" height="12" rx="0.5" />
+              <rect x="9.5" y="2" width="3.5" height="12" rx="0.5" />
+            </svg>
+          )}
+          {paused ? "Play" : "Pause"}
         </button>
         <button
           onClick={handleRestart}
-          className="px-3 py-1.5 text-sm rounded-md border border-border bg-bg-surface text-text-muted hover:border-accent hover:text-text-primary transition-colors"
+          className="px-3 py-1.5 text-sm rounded-md border border-border bg-bg-surface text-text-muted hover:border-accent hover:text-text-primary transition-colors inline-flex items-center gap-2"
         >
-          ↺ Restart
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 8 a5 5 0 1 0 1.5 -3.5" />
+            <path d="M3 3 L3 5 L5 5" />
+          </svg>
+          Restart
         </button>
         <button
           onClick={handleToggleRapier}
