@@ -54,18 +54,24 @@ export default function Viewer() {
       scene.background = new THREE.Color(0x111820);
       scene.fog = new THREE.Fog(0x111820, 40, 120);
 
-      const camera = new THREE.PerspectiveCamera(
-        45, mount.clientWidth / mount.clientHeight, 0.01, 200
-      );
+      // Fall back to reasonable defaults if layout hasn't settled yet.
+      // Passing 0 to `renderer.setSize` on WebGL2 allocates a 0×0 immutable
+      // texture, after which any later resize fails with
+      // `GL_INVALID_OPERATION: glTexStorage2D: Texture is immutable`.
+      const initW = mount.clientWidth || 800;
+      const initH = mount.clientHeight || 600;
+      const camera = new THREE.PerspectiveCamera(45, initW / initH, 0.01, 200);
       camera.position.set(0, 4, 18);
       camera.lookAt(0, 1, 0);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       rendererRef = renderer;
       renderer.setPixelRatio(window.devicePixelRatio);
-      renderer.setSize(mount.clientWidth, mount.clientHeight);
+      renderer.setSize(initW, initH);
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // Three.js r180+ deprecated PCFSoftShadowMap (it now aliases to
+      // PCFShadowMap internally anyway); use the non-deprecated constant.
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       mount.appendChild(renderer.domElement);
 
       const controls = new OrbitControls(camera, renderer.domElement);
@@ -148,9 +154,15 @@ export default function Viewer() {
 
       // ── Resize observer ────────────────────────────────────────────────────
       const resizeObs = new ResizeObserver(() => {
-        camera.aspect = mount.clientWidth / mount.clientHeight;
+        const rw = mount.clientWidth;
+        const rh = mount.clientHeight;
+        // Skip zero-size resize events (mount getting attached/detached).
+        // `renderer.setSize(0, 0)` on WebGL2 leaves the draw buffer in an
+        // immutable 0×0 state, poisoning subsequent resizes.
+        if (rw === 0 || rh === 0) return;
+        camera.aspect = rw / rh;
         camera.updateProjectionMatrix();
-        renderer.setSize(mount.clientWidth, mount.clientHeight);
+        renderer.setSize(rw, rh);
       });
       resizeObs.observe(mount);
 

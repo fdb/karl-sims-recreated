@@ -72,7 +72,9 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(w, h);
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // Three.js r180+ deprecated PCFSoftShadowMap (it now aliases to
+      // PCFShadowMap internally anyway); use the non-deprecated constant.
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       mount.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
