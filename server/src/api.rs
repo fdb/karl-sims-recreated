@@ -95,8 +95,16 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn list_evolutions(State(state): State<AppState>) -> Json<Vec<EvolutionInfo>> {
-    let conn = state.db.lock().unwrap();
-    let evos = db::list_evolutions(&conn);
+    // All DB calls in handlers go through `spawn_blocking`. They are
+    // synchronous rusqlite calls, and we don't want them occupying a tokio
+    // runtime worker (which would block unrelated HTTP traffic).
+    let db = state.db.clone();
+    let evos = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::list_evolutions(&conn)
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(
         evos.into_iter()
             .map(|e| EvolutionInfo {
@@ -138,8 +146,15 @@ async fn create_evolution(
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
-        let conn = state.db.lock().unwrap();
-        db::create_evolution(&conn, &config_json, req.name.as_deref())
+        let db = state.db.clone();
+        let config_json = config_json.clone();
+        let name = req.name.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = db.get().expect("pool get");
+            db::create_evolution(&conn, &config_json, name.as_deref())
+        })
+        .await
+        .expect("spawn_blocking join")
     };
 
     // Spawn coordinator for this evolution.
@@ -156,8 +171,14 @@ async fn get_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let conn = state.db.lock().unwrap();
-    match db::get_evolution_full(&conn, id) {
+    let db = state.db.clone();
+    let full = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::get_evolution_full(&conn, id)
+    })
+    .await
+    .expect("spawn_blocking join");
+    match full {
         Some((status, generation, config_json, name)) => {
             let config = serde_json::from_str::<serde_json::Value>(&config_json)
                 .unwrap_or_default();
@@ -178,10 +199,16 @@ async fn patch_evolution(
     Path(id): Path<i64>,
     Json(req): Json<PatchEvolutionRequest>,
 ) -> Json<serde_json::Value> {
-    let conn = state.db.lock().unwrap();
     // Trim whitespace; treat empty string as None (remove name)
     let name = req.name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    db::set_evolution_name(&conn, id, name.as_deref());
+    let db = state.db.clone();
+    let name_for_db = name.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::set_evolution_name(&conn, id, name_for_db.as_deref());
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(serde_json::json!({"id": id, "name": name}))
 }
 
@@ -189,10 +216,15 @@ async fn delete_evolution_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let conn = state.db.lock().unwrap();
-    // Stop first so the coordinator task exits on its next status check.
-    db::stop_evolution(&conn, id);
-    db::delete_evolution(&conn, id);
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        // Stop first so the coordinator task exits on its next status check.
+        db::stop_evolution(&conn, id);
+        db::delete_evolution(&conn, id);
+    })
+    .await
+    .expect("spawn_blocking join");
     axum::http::StatusCode::NO_CONTENT
 }
 
@@ -200,8 +232,13 @@ async fn get_best(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let conn = state.db.lock().unwrap();
-    let best = db::get_best_genotypes(&conn, id, 10);
+    let db = state.db.clone();
+    let best = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::get_best_genotypes(&conn, id, 10)
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(
         best.into_iter()
             .map(|(gid, fitness, _bytes, island_id)| {
@@ -215,8 +252,13 @@ async fn get_best_per_island_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let conn = state.db.lock().unwrap();
-    let best = db::get_best_per_island(&conn, id);
+    let db = state.db.clone();
+    let best = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::get_best_per_island(&conn, id)
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(
         best.into_iter()
             .map(|(gid, fitness, island_id)| {
@@ -230,8 +272,13 @@ async fn stop_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let conn = state.db.lock().unwrap();
-    db::stop_evolution(&conn, id);
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::stop_evolution(&conn, id);
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(serde_json::json!({"status": "stopped"}))
 }
 
@@ -239,8 +286,13 @@ async fn pause_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let conn = state.db.lock().unwrap();
-    db::pause_evolution(&conn, id);
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::pause_evolution(&conn, id);
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(serde_json::json!({"status": "paused"}))
 }
 
@@ -248,8 +300,13 @@ async fn resume_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let conn = state.db.lock().unwrap();
-    db::resume_evolution(&conn, id);
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::resume_evolution(&conn, id);
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(serde_json::json!({"status": "running"}))
 }
 
@@ -257,8 +314,13 @@ async fn get_evolution_stats(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let conn = state.db.lock().unwrap();
-    let stats = db::get_generation_stats(&conn, id);
+    let db = state.db.clone();
+    let stats = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::get_generation_stats(&conn, id)
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(
         stats
             .into_iter()
@@ -277,8 +339,13 @@ async fn get_island_stats_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let conn = state.db.lock().unwrap();
-    let stats = db::get_island_stats(&conn, id);
+    let db = state.db.clone();
+    let stats = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::get_island_stats(&conn, id)
+    })
+    .await
+    .expect("spawn_blocking join");
     Json(
         stats
             .into_iter()
@@ -298,8 +365,14 @@ async fn get_genome_bytes(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let conn = state.db.lock().unwrap();
-    match db::get_genotype(&conn, id) {
+    let db = state.db.clone();
+    let bytes = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        db::get_genotype(&conn, id)
+    })
+    .await
+    .expect("spawn_blocking join");
+    match bytes {
         Some(bytes) => (
             [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
             bytes,
@@ -316,56 +389,64 @@ async fn get_phenotype_info(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let conn = state.db.lock().unwrap();
-    match db::get_genotype(&conn, id) {
-        Some(bytes) => {
-            match bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes) {
-                Ok(genome) => {
-                    let pheno = karl_sims_core::phenotype::develop(&genome);
-                    // Pair each body with its originating genome node.
-                    let bodies: Vec<_> = pheno
-                        .world
-                        .bodies
-                        .iter()
-                        .enumerate()
-                        .map(|(i, body)| {
-                            let (geno_idx, depth) = pheno.body_node_map[i];
-                            let jt = format!("{:?}", genome.nodes[geno_idx].joint_type);
-                            serde_json::json!({
-                                "id": i,
-                                "genome_node": geno_idx,
-                                "depth": depth,
-                                "half_extents": [body.half_extents.x, body.half_extents.y, body.half_extents.z],
-                                "joint_type": jt,
-                            })
-                        })
-                        .collect();
-                    let joints: Vec<_> = pheno
-                        .world
-                        .joints
-                        .iter()
-                        .map(|j| {
-                            serde_json::json!({
-                                "parent": j.parent_idx,
-                                "child": j.child_idx,
-                                "joint_type": format!("{:?}", j.joint_type),
-                            })
-                        })
-                        .collect();
-                    let info = serde_json::json!({
-                        "id": id,
-                        "num_bodies": bodies.len(),
-                        "num_joints": joints.len(),
-                        "root": pheno.world.root,
-                        "bodies": bodies,
-                        "joints": joints,
-                    });
-                    Json(info).into_response()
-                }
-                Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            }
-        }
-        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    // Everything — DB read, deserialization, `develop()`, JSON building —
+    // runs on a blocking-pool thread. Tokio runtime workers stay free to
+    // handle other HTTP traffic. The pool connection is released as soon as
+    // the BLOB read completes, before the CPU-heavy JSON tree is built.
+    let db = state.db.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
+        let bytes = {
+            let conn = db.get().expect("pool get");
+            db::get_genotype(&conn, id)
+        };
+        let bytes = bytes.ok_or(axum::http::StatusCode::NOT_FOUND)?;
+        let genome = bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes)
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+        let pheno = karl_sims_core::phenotype::develop(&genome);
+        // Pair each body with its originating genome node.
+        let bodies: Vec<_> = pheno
+            .world
+            .bodies
+            .iter()
+            .enumerate()
+            .map(|(i, body)| {
+                let (geno_idx, depth) = pheno.body_node_map[i];
+                let jt = format!("{:?}", genome.nodes[geno_idx].joint_type);
+                serde_json::json!({
+                    "id": i,
+                    "genome_node": geno_idx,
+                    "depth": depth,
+                    "half_extents": [body.half_extents.x, body.half_extents.y, body.half_extents.z],
+                    "joint_type": jt,
+                })
+            })
+            .collect();
+        let joints: Vec<_> = pheno
+            .world
+            .joints
+            .iter()
+            .map(|j| {
+                serde_json::json!({
+                    "parent": j.parent_idx,
+                    "child": j.child_idx,
+                    "joint_type": format!("{:?}", j.joint_type),
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "id": id,
+            "num_bodies": bodies.len(),
+            "num_joints": joints.len(),
+            "root": pheno.world.root,
+            "bodies": bodies,
+            "joints": joints,
+        }))
+    })
+    .await
+    .expect("spawn_blocking join");
+    match result {
+        Ok(info) => Json(info).into_response(),
+        Err(status) => status.into_response(),
     }
 }
 
@@ -373,56 +454,63 @@ async fn get_genotype_info(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let conn = state.db.lock().unwrap();
-    match db::get_genotype(&conn, id) {
-        Some(bytes) => {
-            match bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes) {
-                Ok(genome) => {
-                    let info = serde_json::json!({
-                        "id": id,
-                        "num_nodes": genome.nodes.len(),
-                        "num_connections": genome.connections.len(),
-                        "nodes": genome.nodes.iter().enumerate().map(|(i, n)| {
+    // All DB + CPU work happens on the blocking pool. Connection is dropped
+    // immediately after fetching the BLOB, before the (often large) JSON
+    // tree over neurons/connections is built.
+    let db = state.db.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
+        let bytes = {
+            let conn = db.get().expect("pool get");
+            db::get_genotype(&conn, id)
+        };
+        let bytes = bytes.ok_or(axum::http::StatusCode::NOT_FOUND)?;
+        let genome = bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes)
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+        Ok(serde_json::json!({
+            "id": id,
+            "num_nodes": genome.nodes.len(),
+            "num_connections": genome.connections.len(),
+            "nodes": genome.nodes.iter().enumerate().map(|(i, n)| {
+                serde_json::json!({
+                    "id": i,
+                    "dimensions": [n.dimensions.x, n.dimensions.y, n.dimensions.z],
+                    "joint_type": format!("{:?}", n.joint_type),
+                    "recursive_limit": n.recursive_limit,
+                    "terminal_only": n.terminal_only,
+                    "brain": {
+                        "num_neurons": n.brain.neurons.len(),
+                        "num_effectors": n.brain.effectors.len(),
+                        "neurons": n.brain.neurons.iter().enumerate().map(|(j, neuron)| {
                             serde_json::json!({
-                                "id": i,
-                                "dimensions": [n.dimensions.x, n.dimensions.y, n.dimensions.z],
-                                "joint_type": format!("{:?}", n.joint_type),
-                                "recursive_limit": n.recursive_limit,
-                                "terminal_only": n.terminal_only,
-                                "brain": {
-                                    "num_neurons": n.brain.neurons.len(),
-                                    "num_effectors": n.brain.effectors.len(),
-                                    "neurons": n.brain.neurons.iter().enumerate().map(|(j, neuron)| {
-                                        serde_json::json!({
-                                            "id": j,
-                                            "func": format!("{:?}", neuron.func),
-                                            "inputs": neuron.inputs.iter().map(|(inp, w)| {
-                                                serde_json::json!({
-                                                    "source": format!("{:?}", inp),
-                                                    "weight": w,
-                                                })
-                                            }).collect::<Vec<_>>(),
-                                        })
-                                    }).collect::<Vec<_>>(),
-                                }
+                                "id": j,
+                                "func": format!("{:?}", neuron.func),
+                                "inputs": neuron.inputs.iter().map(|(inp, w)| {
+                                    serde_json::json!({
+                                        "source": format!("{:?}", inp),
+                                        "weight": w,
+                                    })
+                                }).collect::<Vec<_>>(),
                             })
                         }).collect::<Vec<_>>(),
-                        "connections": genome.connections.iter().map(|c| {
-                            serde_json::json!({
-                                "source": c.source,
-                                "target": c.target,
-                                "parent_face": format!("{:?}", c.parent_face),
-                                "child_face": format!("{:?}", c.child_face),
-                                "scale": c.scale,
-                                "reflection": c.reflection,
-                            })
-                        }).collect::<Vec<_>>(),
-                    });
-                    Json(info).into_response()
-                }
-                Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            }
-        }
-        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+                    }
+                })
+            }).collect::<Vec<_>>(),
+            "connections": genome.connections.iter().map(|c| {
+                serde_json::json!({
+                    "source": c.source,
+                    "target": c.target,
+                    "parent_face": format!("{:?}", c.parent_face),
+                    "child_face": format!("{:?}", c.child_face),
+                    "scale": c.scale,
+                    "reflection": c.reflection,
+                })
+            }).collect::<Vec<_>>(),
+        }))
+    })
+    .await
+    .expect("spawn_blocking join");
+    match result {
+        Ok(info) => Json(info).into_response(),
+        Err(status) => status.into_response(),
     }
 }

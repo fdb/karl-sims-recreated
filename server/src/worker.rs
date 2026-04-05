@@ -14,8 +14,12 @@ pub fn spawn_worker(db: DbPool, worker_id: String) {
 
 fn run_worker_loop(db: DbPool, worker_id: String) {
     loop {
+        // Each `db.get()` returns a PooledConnection that derefs to &Connection.
+        // No global lock — other workers, API handlers, and the coordinator
+        // each hold their own connection, and SQLite's WAL serializes the
+        // actual writes internally.
         let task = {
-            let conn = db.lock().unwrap();
+            let conn = db.get().expect("pool get (claim)");
             claim_task(&conn, &worker_id)
         };
 
@@ -25,13 +29,15 @@ fn run_worker_loop(db: DbPool, worker_id: String) {
                     Ok(genome) => {
                         let params: EvolutionParams =
                             serde_json::from_str(&config_json).unwrap_or_default();
+                        // Fitness evaluation is the CPU-bound work — intentionally
+                        // run with NO connection held, so we don't starve the pool.
                         let result = evaluate_fitness(&genome, &params);
-                        let conn = db.lock().unwrap();
+                        let conn = db.get().expect("pool get (complete)");
                         complete_task(&conn, task_id, result.score);
                     }
                     Err(e) => {
                         log::error!("Worker {worker_id}: failed to deserialize genome for task {task_id}: {e}");
-                        let conn = db.lock().unwrap();
+                        let conn = db.get().expect("pool get (complete-err)");
                         complete_task(&conn, task_id, 0.0);
                     }
                 }

@@ -1,16 +1,46 @@
-use std::sync::{Arc, Mutex};
-
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-pub type DbPool = Arc<Mutex<Connection>>;
+/// A pool of SQLite connections. Every pool member opens the same database
+/// file and shares its WAL; locking is handled by SQLite itself, not by us.
+///
+/// Previously this was `Arc<Mutex<Connection>>` — a single connection behind
+/// a global mutex, which meant every worker thread, every API handler, and
+/// the coordinator all serialized through one lock. With a pool, each caller
+/// holds its own connection and SQLite's WAL lets readers proceed in parallel
+/// with a single writer.
+pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
 
-/// Open (or create) the database and ensure all tables exist.
+/// Pragmas applied to every connection the pool hands out. `synchronous=NORMAL`
+/// is the standard companion to WAL — still crash-safe, roughly 10× faster
+/// than the `FULL` default because it skips an fsync per commit. `busy_timeout`
+/// makes concurrent writers wait instead of failing with `SQLITE_BUSY`.
+fn apply_pragmas(conn: &mut Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA synchronous=NORMAL;
+         PRAGMA busy_timeout=5000;
+         PRAGMA foreign_keys=ON;",
+    )
+}
+
+/// Open (or create) the database, ensure all tables exist, and return a pool.
 pub fn init_db(path: &str) -> DbPool {
-    let conn = Connection::open(path).expect("Failed to open database");
+    // Run the schema + migrations on a dedicated connection first, so that by
+    // the time the pool hands connections out they all see a fully migrated DB.
+    let manager = SqliteConnectionManager::file(path).with_init(|c| {
+        apply_pragmas(c)
+    });
+    // 16 connections is plenty: N worker threads + the coordinator + a handful
+    // of concurrent API requests. `r2d2` blocks callers waiting past this cap,
+    // but real contention is unlikely given the short critical sections.
+    let pool = r2d2::Pool::builder()
+        .max_size(16)
+        .build(manager)
+        .expect("Failed to build SQLite pool");
 
-    // Enable WAL mode for better concurrent read performance.
-    conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
+    let conn = pool.get().expect("Failed to acquire initial connection");
 
     conn.execute_batch(
         "
@@ -80,7 +110,8 @@ pub fn init_db(path: &str) -> DbPool {
     )
     .ok();
 
-    Arc::new(Mutex::new(conn))
+    drop(conn);
+    pool
 }
 
 /// Insert a new evolution run, return its ID.

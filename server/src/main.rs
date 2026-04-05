@@ -32,7 +32,7 @@ async fn main() {
 
     // Resume any evolutions that were running when the server last stopped.
     {
-        let conn = db.lock().unwrap();
+        let conn = db.get().expect("pool get");
         let evos = db::list_evolutions(&conn);
         for evo in &evos {
             if evo.status == "running" {

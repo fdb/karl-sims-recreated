@@ -20,7 +20,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
 
     // Read params from DB.
     let params: EvolutionParams = {
-        let conn = db.lock().unwrap();
+        let conn = db.get().expect("pool get");
         get_evolution_full(&conn, evo_id)
             .and_then(|(_, _, config_json, _)| serde_json::from_str(&config_json).ok())
             .unwrap_or_default()
@@ -38,7 +38,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
 
     // Check if this evolution already has generations (resuming after server restart).
     let start_gen = {
-        let conn = db.lock().unwrap();
+        let conn = db.get().expect("pool get");
         get_evolution_status(&conn, evo_id)
             .map(|(_, current_gen)| current_gen)
             .unwrap_or(0) as usize
@@ -46,7 +46,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
 
     // Only create generation 0 if the evolution is brand new (no genotypes yet).
     let has_genotypes = {
-        let conn = db.lock().unwrap();
+        let conn = db.get().expect("pool get");
         !get_generation_fitnesses(&conn, evo_id, 0).is_empty()
             || pending_task_count(&conn, evo_id) > 0
     };
@@ -60,7 +60,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             "Evolution {evo_id}: creating initial population ({} islands × {} creatures = {} total)",
             num_islands, per_island_pop, num_islands * per_island_pop,
         );
-        let conn = db.lock().unwrap();
+        let conn = db.get().expect("pool get");
         for island_id in 0..num_islands {
             for _ in 0..per_island_pop {
                 let genome = GenomeGraph::random(&mut rng);
@@ -82,7 +82,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         // Check if the evolution has been stopped or paused.
         loop {
             let status = {
-                let conn = db.lock().unwrap();
+                let conn = db.get().expect("pool get");
                 get_evolution_status(&conn, evo_id).map(|(s, _)| s)
             };
             match status.as_deref() {
@@ -102,7 +102,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         // Wait for all pending/running tasks to complete.
         loop {
             let pending = {
-                let conn = db.lock().unwrap();
+                let conn = db.get().expect("pool get");
                 pending_task_count(&conn, evo_id)
             };
             if pending == 0 {
@@ -117,7 +117,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         let mut island_individuals: Vec<Vec<(GenomeGraph, f64)>> =
             vec![Vec::new(); num_islands];
         for (island_id, bucket) in island_individuals.iter_mut().enumerate() {
-            let conn = db.lock().unwrap();
+            let conn = db.get().expect("pool get");
             let pairs = get_generation_fitnesses_by_island(
                 &conn, evo_id, island_id as i64, cur_gen as i64,
             );
@@ -185,7 +185,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
                 "Evolution {evo_id} Gen {cur_gen}: all zero fitness, regenerating random population"
             );
             let next_gen = cur_gen + 1;
-            let conn = db.lock().unwrap();
+            let conn = db.get().expect("pool get");
             update_evolution(&conn, evo_id, "running", next_gen as i64);
             for island_id in 0..num_islands {
                 for _ in 0..per_island_pop {
@@ -203,7 +203,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         // Prepare next generation.
         let next_gen = cur_gen + 1;
         {
-            let conn = db.lock().unwrap();
+            let conn = db.get().expect("pool get");
             update_evolution(&conn, evo_id, "running", next_gen as i64);
         }
 
@@ -260,7 +260,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             };
             if let Some((genome, fitness)) = &migrant {
                 let bytes = bincode::serialize(genome).unwrap();
-                let conn = db.lock().unwrap();
+                let conn = db.get().expect("pool get");
                 insert_genotype_with_fitness(
                     &conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
                 );
@@ -271,7 +271,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             for (genome, fitness) in survivors.iter().zip(survivor_fitnesses.iter()) {
                 if offspring_count >= per_island_pop { break; }
                 let bytes = bincode::serialize(genome).unwrap();
-                let conn = db.lock().unwrap();
+                let conn = db.get().expect("pool get");
                 insert_genotype_with_fitness(
                     &conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
                 );
@@ -290,7 +290,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
                 if offspring_count >= per_island_pop { break; }
                 let child = GenomeGraph::random(&mut rng);
                 let bytes = bincode::serialize(&child).unwrap();
-                let conn = db.lock().unwrap();
+                let conn = db.get().expect("pool get");
                 let gid = insert_genotype(
                     &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
                 );
@@ -321,7 +321,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
                 };
 
                 let bytes = bincode::serialize(&child).unwrap();
-                let conn = db.lock().unwrap();
+                let conn = db.get().expect("pool get");
                 let gid = insert_genotype(
                     &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
                 );
@@ -332,7 +332,7 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
     }
 
     {
-        let conn = db.lock().unwrap();
+        let conn = db.get().expect("pool get");
         update_evolution(&conn, evo_id, "completed", -1);
     }
     log::info!("Evolution {evo_id} completed");
