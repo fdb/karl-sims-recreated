@@ -4,12 +4,14 @@ import {
   getGenomeBytes,
   getBestCreatures,
   getEvolution,
+  getPhenotypeInfo,
   type GenotypeInfo,
   type CreatureInfo,
+  type PhenotypeInfo,
 } from "../api";
 import { navigate } from "../router";
 import MorphologyGraph from "../components/MorphologyGraph";
-import BrainGraph from "../components/BrainGraph";
+import PhenotypeGraph from "../components/PhenotypeGraph";
 import CreatureViewer from "../components/CreatureViewer";
 
 function formatFitness(v: number): string {
@@ -29,6 +31,7 @@ interface Props {
 
 export default function CreatureDetail({ evoId, creatureId }: Props) {
   const [info, setInfo] = useState<GenotypeInfo | null>(null);
+  const [phenotype, setPhenotype] = useState<PhenotypeInfo | null>(null);
   const [creature, setCreature] = useState<CreatureInfo | null>(null);
   const [genomeBytes, setGenomeBytes] = useState<Uint8Array | null>(null);
   const [environment, setEnvironment] = useState<"Water" | "Land">("Water");
@@ -41,10 +44,11 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
       setLoading(true);
       setGenomeBytes(null);
       try {
-        const [creatures, evo, genoInfo, bytes] = await Promise.all([
+        const [creatures, evo, genoInfo, phenoInfo, bytes] = await Promise.all([
           getBestCreatures(evoId),
           getEvolution(evoId),
           getGenotypeInfo(creatureId),
+          getPhenotypeInfo(creatureId),
           getGenomeBytes(creatureId),
         ]);
 
@@ -53,6 +57,7 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
         if (evo.config?.environment) setEnvironment(evo.config.environment);
         if (evo.config?.goal) setGoal(evo.config.goal);
         setInfo(genoInfo);
+        setPhenotype(phenoInfo);
         setGenomeBytes(new Uint8Array(bytes));
       } catch (e) {
         setError(String(e));
@@ -116,20 +121,28 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
         </div>
         <div className="lg:col-span-1 space-y-4 lg:overflow-y-auto lg:max-h-[calc(100vh-200px)]">
           {info && (
-            <>
-              <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
-                <h2 className="text-sm font-medium text-text-secondary mb-3">
-                  Morphology Graph
-                </h2>
-                <MorphologyGraph info={info} />
-              </div>
-              <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
-                <h2 className="text-sm font-medium text-text-secondary mb-3">
-                  Neural Network
-                </h2>
-                <BrainGraph info={info} />
-              </div>
-            </>
+            <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
+              <h2 className="text-sm font-medium text-text-secondary mb-1">
+                Genotype Graph
+              </h2>
+              <p className="text-xs text-text-muted mb-3">
+                {info.num_nodes} nodes · {info.num_connections} connections ·
+                neurons inlined as colored chips
+              </p>
+              <MorphologyGraph info={info} />
+            </div>
+          )}
+          {phenotype && (
+            <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
+              <h2 className="text-sm font-medium text-text-secondary mb-1">
+                Phenotype Graph
+              </h2>
+              <p className="text-xs text-text-muted mb-3">
+                {phenotype.num_bodies} bodies · {phenotype.num_joints} joints
+                — after BFS expansion with recursion / terminal pruning
+              </p>
+              <PhenotypeGraph info={phenotype} />
+            </div>
           )}
         </div>
       </div>

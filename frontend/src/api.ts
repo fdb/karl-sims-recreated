@@ -145,3 +145,27 @@ export async function getGenomeBytes(id: number): Promise<ArrayBuffer> {
   const res = await fetch(`${API_BASE}/api/genotypes/${id}/genome`);
   return res.arrayBuffer();
 }
+
+export interface PhenotypeInfo {
+  id: number;
+  num_bodies: number;
+  num_joints: number;
+  root: number;
+  bodies: {
+    id: number;
+    genome_node: number;
+    depth: number;
+    half_extents: [number, number, number];
+    joint_type: string;
+  }[];
+  joints: {
+    parent: number;
+    child: number;
+    joint_type: string;
+  }[];
+}
+
+export async function getPhenotypeInfo(id: number): Promise<PhenotypeInfo> {
+  const res = await fetch(`${API_BASE}/api/genotypes/${id}/phenotype`);
+  return res.json();
+}

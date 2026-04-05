@@ -78,6 +78,10 @@ pub fn routes() -> Router<AppState> {
             "/api/genotypes/{id}/genome",
             axum::routing::get(get_genome_bytes),
         )
+        .route(
+            "/api/genotypes/{id}/phenotype",
+            axum::routing::get(get_phenotype_info),
+        )
 }
 
 async fn list_evolutions(State(state): State<AppState>) -> Json<Vec<EvolutionInfo>> {
@@ -118,6 +122,7 @@ async fn create_evolution(
         max_parts: req.max_parts.unwrap_or(20).clamp(2, 50),
         gravity: req.gravity.unwrap_or(9.81).clamp(0.0, 30.0),
         water_viscosity: req.water_viscosity.unwrap_or(2.0).clamp(0.1, 10.0),
+        max_body_angular_velocity: Some(20.0),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
@@ -250,6 +255,66 @@ async fn get_genome_bytes(
             bytes,
         )
             .into_response(),
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Develops a genome into its realized phenotype and returns body + joint info.
+/// This shows what the creature *actually becomes* after BFS expansion,
+/// respecting recursive_limit / terminal_only / connectivity pruning.
+async fn get_phenotype_info(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let conn = state.db.lock().unwrap();
+    match db::get_genotype(&conn, id) {
+        Some(bytes) => {
+            match bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes) {
+                Ok(genome) => {
+                    let pheno = karl_sims_core::phenotype::develop(&genome);
+                    // Pair each body with its originating genome node.
+                    let bodies: Vec<_> = pheno
+                        .world
+                        .bodies
+                        .iter()
+                        .enumerate()
+                        .map(|(i, body)| {
+                            let (geno_idx, depth) = pheno.body_node_map[i];
+                            let jt = format!("{:?}", genome.nodes[geno_idx].joint_type);
+                            serde_json::json!({
+                                "id": i,
+                                "genome_node": geno_idx,
+                                "depth": depth,
+                                "half_extents": [body.half_extents.x, body.half_extents.y, body.half_extents.z],
+                                "joint_type": jt,
+                            })
+                        })
+                        .collect();
+                    let joints: Vec<_> = pheno
+                        .world
+                        .joints
+                        .iter()
+                        .map(|j| {
+                            serde_json::json!({
+                                "parent": j.parent_idx,
+                                "child": j.child_idx,
+                                "joint_type": format!("{:?}", j.joint_type),
+                            })
+                        })
+                        .collect();
+                    let info = serde_json::json!({
+                        "id": id,
+                        "num_bodies": bodies.len(),
+                        "num_joints": joints.len(),
+                        "root": pheno.world.root,
+                        "bodies": bodies,
+                        "joints": joints,
+                    });
+                    Json(info).into_response()
+                }
+                Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            }
+        }
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
 }
