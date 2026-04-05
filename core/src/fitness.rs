@@ -239,6 +239,17 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
         .iter()
         .map(|t| glam::DQuat::from_mat3(&t.matrix3))
         .collect();
+    // Per-body positions for per-body speed check. A physics blowup can
+    // launch a single limb at thousands of m/s while the root body stays
+    // bounded — without this check the creature scores whatever the root
+    // happens to be doing, and evolution learns to trigger those blowups
+    // because the explosion also yanks the root around to its advantage.
+    let mut prev_body_positions: Vec<DVec3> = creature
+        .world
+        .transforms
+        .iter()
+        .map(|t| t.translation)
+        .collect();
 
     // Per-DOF windowed Welford accumulators for joint-angle stddev tracking.
     // (See `min_joint_motion` doc on EvolutionParams.) We split the sim into
@@ -259,6 +270,14 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     // Current in-progress window Welford state (count, mean, m2) per DOF.
     let mut window_stats: Vec<(u64, f64, f64)> = vec![(0, 0.0, 0.0); dof_index.len()];
     let mut frames_in_window: usize = 0;
+    // Unwrapped previous joint-angle sample (per DOF). The reported angle
+    // lives in [-π, π] and wraps at the boundary, but physical joint
+    // rotation is continuous. We unwrap the signal against the previous
+    // sample before feeding Welford, so a joint that physically rotates
+    // through ±π doesn't register a 2π variance spike that would pass a
+    // truly pinned joint through the min_joint_motion check.
+    let mut prev_joint_angle: Vec<f64> = vec![0.0; dof_index.len()];
+    let mut have_prev: Vec<bool> = vec![false; dof_index.len()];
 
     for step in 0..total_steps {
         creature.step(dt);
@@ -283,6 +302,13 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
                 initial_pos = pos;
                 max_displacement = 0.0;
                 early_check_step = actual_settle_steps + (2.0 / dt).round() as usize;
+                // Reset brain time so oscillators start their cycles at t=0
+                // regardless of how long settle took. Without this, the same
+                // creature produces different gait phases under different
+                // settle durations, which breaks reproducibility and biases
+                // evolution toward gaits that happen to land well at the
+                // current settle timing.
+                creature.brain.reset_time();
             }
         }
 
@@ -301,6 +327,21 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
             };
         }
         prev_pos = pos;
+
+        // Per-body speed check: any body moving faster than the speed cap is
+        // the signature of a constraint-solver explosion. Catches creatures
+        // whose limb fires off at thousands of m/s while root stays tame.
+        for (i, t) in creature.world.transforms.iter().enumerate() {
+            let body_pos = t.translation;
+            if !body_pos.is_finite() {
+                return FitnessResult { score: 0.0, distance: 0.0, max_displacement: 0.0, terminated_early: true };
+            }
+            let body_speed = (body_pos - prev_body_positions[i]).length() / dt;
+            if body_speed > MAX_PLAUSIBLE_SPEED {
+                return FitnessResult { score: 0.0, distance: 0.0, max_displacement: 0.0, terminated_early: true };
+            }
+            prev_body_positions[i] = body_pos;
+        }
 
         // Per-body angular velocity check (configurable, non-paper).
         if let Some(max_angvel) = params.max_body_angular_velocity {
@@ -332,14 +373,27 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
         // Also skip the very frame where settle ends (step+1 == actual_settle_steps)
         // because we just reset initial_pos above; joint sampling starts next frame.
 
-        // Update in-window joint-angle Welford accumulators.
+        // Update in-window joint-angle Welford accumulators, unwrapping
+        // against the previous sample so ±π boundary crossings don't
+        // spoof huge variance.
         for (i, &(ji, d)) in dof_index.iter().enumerate() {
-            let x = creature.world.joints[ji].angles[d];
+            let raw = creature.world.joints[ji].angles[d];
+            let unwrapped = if have_prev[i] {
+                let mut candidate = raw;
+                let prev = prev_joint_angle[i];
+                while candidate - prev >  std::f64::consts::PI { candidate -= 2.0 * std::f64::consts::PI; }
+                while candidate - prev < -std::f64::consts::PI { candidate += 2.0 * std::f64::consts::PI; }
+                candidate
+            } else {
+                have_prev[i] = true;
+                raw
+            };
+            prev_joint_angle[i] = unwrapped;
             let (count, mean, m2) = &mut window_stats[i];
             *count += 1;
-            let delta = x - *mean;
+            let delta = unwrapped - *mean;
             *mean += delta / (*count as f64);
-            let delta2 = x - *mean;
+            let delta2 = unwrapped - *mean;
             *m2 += delta * delta2;
         }
         frames_in_window += 1;

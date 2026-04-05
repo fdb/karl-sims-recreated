@@ -285,6 +285,13 @@ impl BrainInstance {
         }
     }
 
+    /// Reset brain time to zero. Used after the settle phase so the
+    /// oscillator frequency/phase relationship is identical regardless of
+    /// settle duration (creatures see time=0 at evaluation start).
+    pub fn reset_time(&mut self) {
+        self.time = 0.0;
+    }
+
     /// Advance brain by one physics timestep.
     ///
     /// Runs 2 brain evaluation steps per physics step (per the Sims paper)
