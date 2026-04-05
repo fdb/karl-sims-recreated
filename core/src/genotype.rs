@@ -126,7 +126,11 @@ impl BrainGraph {
                 ],
             });
 
-            let weight: f64 = rng.gen_range(1.0..5.0);
+            // Initial effector weight in [0.5, 1.5] — a neuron output near
+            // ±1 then produces roughly full-budget torque without saturating
+            // hard on smaller oscillations. Paired with the mutation clamp
+            // of ±2.0 in mutation.rs. (Sims 1994 §3.2.)
+            let weight: f64 = rng.gen_range(0.5..1.5);
             effectors.push(EffectorNode {
                 input: NeuronInput::Neuron(i),
                 weight,

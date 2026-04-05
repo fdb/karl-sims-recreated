@@ -299,8 +299,14 @@ fn mutate_brain<R: Rng>(brain: &mut BrainGraph, rng: &mut R, scale: f64) {
     }
 
     // Mutate each effector.
+    //
+    // Effector weight is a gain applied before the [-1, 1] budget clamp in
+    // `BrainInstance::apply_effectors`. We keep it in a tight range so that
+    // a moderate neuron output produces graded torque rather than instant
+    // saturation: with |weight| ≤ 2, a neuron output of 0.5 saturates at
+    // weight=2 and scales linearly below that. (Sims 1994 §3.2.)
     for effector in &mut brain.effectors {
-        effector.weight = perturb(rng, effector.weight, scale).clamp(-10.0, 10.0);
+        effector.weight = perturb(rng, effector.weight, scale).clamp(-2.0, 2.0);
     }
 
     // With small probability, add a new neuron.
@@ -329,10 +335,19 @@ fn random_neuron_input<R: Rng>(rng: &mut R, n_neurons: usize) -> NeuronInput {
 // Main entry point
 // ---------------------------------------------------------------------------
 
+/// Minimum mutation scale — a floor on the per-mutation perturbation
+/// magnitude, so that large-genome elites still explore meaningfully.
+///
+/// Without this, a 30-node genome has scale 0.033 and a 100-node genome has
+/// scale 0.01 — so tiny that offspring are near-clones of the parent, and
+/// evolution stagnates once the elite gets large. The floor caps the
+/// exploration-penalty of genome bloat.
+const MIN_MUTATION_SCALE: f64 = 0.05;
+
 /// Mutate a genome in place using the 5 operators from Sims' paper.
 pub fn mutate<R: Rng>(genome: &mut GenomeGraph, rng: &mut R) {
     let graph_size = genome.nodes.len().max(1);
-    let mutation_scale = 1.0 / graph_size as f64;
+    let mutation_scale = (1.0 / graph_size as f64).max(MIN_MUTATION_SCALE);
 
     mutate_node_params(genome, rng, mutation_scale);
     maybe_add_node(genome, rng, mutation_scale);
@@ -355,6 +370,38 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
+
+    #[test]
+    fn mutation_scale_has_floor() {
+        // A large genome (many nodes) should still mutate with at least
+        // MIN_MUTATION_SCALE magnitude, not collapse to zero perturbation.
+        // We verify this indirectly: mutate a 100-node genome once and
+        // check that dimensions actually changed.
+        let mut rng = ChaCha8Rng::seed_from_u64(99);
+        let mut genome = GenomeGraph::random(&mut rng);
+        // Synthetically inflate node count to 100.
+        while genome.nodes.len() < 100 {
+            genome.nodes.push(genome.nodes[0].clone());
+        }
+        // 1/100 = 0.01, floor lifts it to 0.05 → noticeable perturbation.
+        let original_dims: Vec<DVec3> =
+            genome.nodes.iter().map(|n| n.dimensions).collect();
+        mutate(&mut genome, &mut rng);
+        let new_dims: Vec<DVec3> =
+            genome.nodes.iter().map(|n| n.dimensions).collect();
+        // Average absolute change should be at least ~1% of dimension value
+        // (not the 0.1%-ish you'd get from scale=0.01).
+        let mut total_abs_change = 0.0;
+        let len = original_dims.len().min(new_dims.len());
+        for i in 0..len {
+            total_abs_change += (original_dims[i] - new_dims[i]).length();
+        }
+        let avg = total_abs_change / len as f64;
+        assert!(
+            avg > 0.005,
+            "avg dim change {avg} suggests mutation_scale floor is not applied"
+        );
+    }
 
     #[test]
     fn mutation_changes_genome() {

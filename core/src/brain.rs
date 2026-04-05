@@ -31,9 +31,23 @@ struct EffectorEntry {
     joint_idx: usize,
     /// DOF index within the joint.
     dof: usize,
-    /// Maximum torque (proportional to cross-sectional area).
+    /// Maximum torque budget for this DOF.
+    ///
+    /// Sims 1994 §3.2: "The strength of each effector output function is
+    /// scaled relative to the maximum cross-sectional dimension of the object
+    /// to which it is attached." The effector is conceptually attached to the
+    /// child body (it rotates the child relative to the parent), so we scale
+    /// by the longest edge of the child box.
     max_torque: f64,
 }
+
+/// Torque budget per meter of limb length (N·m / m).
+///
+/// Calibrated so a canonical 0.3 m cubic limb gets ≈3.6 N·m — the value the
+/// previous min-area×10 formula produced for cubes. Elongated limbs get a
+/// larger budget than under the old formula, matching the paper's "larger
+/// objects move with proportionally larger forces" rationale.
+const TORQUE_PER_METER: f64 = 6.0;
 
 #[derive(Debug, Clone)]
 enum RemappedInput {
@@ -103,12 +117,12 @@ impl BrainInstance {
                 let (joint_idx, dof) = body_joint_dofs[eff_idx];
                 let joint = &phenotype.world.joints[joint_idx];
 
-                // Max torque proportional to min cross-sectional area of connected parts.
-                let parent_he = phenotype.world.bodies[joint.parent_idx].half_extents;
+                // Paper §3.2: torque budget scales with the maximum
+                // cross-sectional dimension (longest edge) of the attached
+                // body — here, the child that the effector moves.
                 let child_he = phenotype.world.bodies[joint.child_idx].half_extents;
-                let parent_area = face_area_min(parent_he);
-                let child_area = face_area_min(child_he);
-                let max_torque = parent_area.min(child_area) * 10.0;
+                let max_dim = (child_he.x.max(child_he.y).max(child_he.z)) * 2.0;
+                let max_torque = max_dim * TORQUE_PER_METER;
 
                 let remapped_input = match &eff.input {
                     NeuronInput::Neuron(idx) => RemappedInput::Neuron(offset + idx),
@@ -260,7 +274,13 @@ impl BrainInstance {
                 RemappedInput::Sensor(idx) => self.sensors.get(*idx).copied().unwrap_or(0.0),
                 RemappedInput::Constant(v) => *v,
             };
-            let torque = (val * eff.weight).clamp(-eff.max_torque, eff.max_torque);
+            // (val * weight) is the commanded fraction of the motion budget,
+            // clamped to [-1, 1]. Then we scale by the physical torque limit.
+            // This ensures torque ≤ max_torque regardless of neuron output
+            // magnitude, and gives graded control: a command of 0.5 produces
+            // half-torque, not saturation. (Sims 1994 §3.2.)
+            let command = (val * eff.weight).clamp(-1.0, 1.0);
+            let torque = command * eff.max_torque;
             world.torques[eff.joint_idx][eff.dof] = torque;
         }
     }
@@ -279,15 +299,6 @@ impl BrainInstance {
 
         self.apply_effectors(world);
     }
-}
-
-/// Minimum face area of a box given half-extents.
-/// Returns the area of the smallest face.
-fn face_area_min(he: glam::DVec3) -> f64 {
-    let xy = 4.0 * he.x * he.y;
-    let xz = 4.0 * he.x * he.z;
-    let yz = 4.0 * he.y * he.z;
-    xy.min(xz).min(yz)
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +439,137 @@ mod tests {
             max_t - min_t > 0.1,
             "Torques should vary over time; range was {}",
             max_t - min_t
+        );
+    }
+
+    // Build a two-body genome with a single revolute DOF driven by a
+    // Constant-input effector of known command value and weight. Returns the
+    // developed phenotype and brain, ready to tick.
+    fn two_body_with_constant_effector(
+        child_dims: DVec3,
+        effector_command: f64,
+        effector_weight: f64,
+    ) -> (Phenotype, BrainInstance) {
+        let genome = GenomeGraph {
+            nodes: vec![
+                MorphNode {
+                    dimensions: DVec3::new(0.5, 0.5, 0.5),
+                    joint_type: JointType::Rigid,
+                    joint_limit_min: [-1.0; 3],
+                    joint_limit_max: [1.0; 3],
+                    recursive_limit: 1,
+                    terminal_only: false,
+                    brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+                },
+                MorphNode {
+                    dimensions: child_dims,
+                    joint_type: JointType::Revolute,
+                    joint_limit_min: [-1.5; 3],
+                    joint_limit_max: [1.5; 3],
+                    recursive_limit: 1,
+                    terminal_only: false,
+                    brain: BrainGraph {
+                        neurons: Vec::new(),
+                        effectors: vec![EffectorNode {
+                            input: NeuronInput::Constant(effector_command),
+                            weight: effector_weight,
+                        }],
+                    },
+                },
+            ],
+            connections: vec![MorphConn {
+                source: 0,
+                target: 1,
+                parent_face: AttachFace::PosX,
+                child_face: AttachFace::NegX,
+                scale: 1.0,
+                reflection: false,
+            }],
+            root: 0,
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+        };
+        let pheno = develop(&genome);
+        assert_eq!(pheno.world.joints.len(), 1);
+        let brain = BrainInstance::from_phenotype(&genome, &pheno);
+        (pheno, brain)
+    }
+
+    use crate::phenotype::Phenotype;
+
+    #[test]
+    fn max_torque_scales_with_child_longest_edge() {
+        // Paper §3.2: strength scaled by the max cross-sectional dimension
+        // of the attached (child) body. Longest edge of (0.4, 0.3, 0.3) is
+        // 0.4 m → max_torque = 0.4 * TORQUE_PER_METER = 2.4 N·m.
+        let (mut pheno, brain) = two_body_with_constant_effector(
+            DVec3::new(0.4, 0.3, 0.3),
+            1.0,  // command = 1.0
+            1.0,  // weight = 1.0 → saturates at command of ±1
+        );
+        brain.apply_effectors(&mut pheno.world);
+        let torque = pheno.world.torques[0][0];
+        let expected = 0.4 * TORQUE_PER_METER;
+        assert!(
+            (torque - expected).abs() < 1e-9,
+            "expected torque ≈ {expected}, got {torque}"
+        );
+    }
+
+    #[test]
+    fn max_torque_uses_longest_edge_not_min_area() {
+        // An elongated limb (0.1, 0.1, 0.6) has longest edge 0.6 m.
+        // Under the old min-area formula it would have been
+        // min_area*10 = 0.04 * 10 = 0.4. Under the paper formula it is
+        // 0.6 * 6.0 = 3.6. Assert we are on the paper side.
+        let (mut pheno, brain) = two_body_with_constant_effector(
+            DVec3::new(0.1, 0.1, 0.6),
+            1.0, 1.0,
+        );
+        brain.apply_effectors(&mut pheno.world);
+        let torque = pheno.world.torques[0][0];
+        assert!(
+            torque > 3.0,
+            "elongated limb should have substantial torque budget under paper \
+             formula, got {torque}"
+        );
+    }
+
+    #[test]
+    fn torque_never_exceeds_budget_for_huge_command() {
+        // A neuron output of 1000 with weight 1.0 should still produce torque
+        // ≤ max_torque — this is the motion-budget guarantee.
+        let (mut pheno, brain) = two_body_with_constant_effector(
+            DVec3::new(0.3, 0.3, 0.3),
+            1000.0, 1.0,
+        );
+        brain.apply_effectors(&mut pheno.world);
+        let torque = pheno.world.torques[0][0];
+        let max_torque = 0.3 * TORQUE_PER_METER;
+        assert!(
+            torque.abs() <= max_torque + 1e-9,
+            "torque {torque} exceeded max_torque {max_torque}"
+        );
+        assert!(
+            (torque - max_torque).abs() < 1e-9,
+            "saturated torque should equal max_torque exactly, got {torque}"
+        );
+    }
+
+    #[test]
+    fn graded_torque_scales_linearly_with_command() {
+        // A command of 0.5 with weight 1.0 should produce half-budget torque,
+        // not saturated torque. This is the "graded control" property.
+        let (mut pheno, brain) = two_body_with_constant_effector(
+            DVec3::new(0.3, 0.3, 0.3),
+            0.5, 1.0,
+        );
+        brain.apply_effectors(&mut pheno.world);
+        let torque = pheno.world.torques[0][0];
+        let max_torque = 0.3 * TORQUE_PER_METER;
+        let expected = 0.5 * max_torque;
+        assert!(
+            (torque - expected).abs() < 1e-9,
+            "expected graded torque {expected}, got {torque}"
         );
     }
 }
