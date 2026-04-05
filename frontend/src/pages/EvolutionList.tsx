@@ -6,7 +6,7 @@ import {
   resumeEvolution,
   type Evolution,
 } from "../api";
-import { navigate } from "../router";
+import { Link } from "@tanstack/react-router";
 import StatusBadge from "../components/StatusBadge";
 import CreateEvolutionForm from "../components/CreateEvolutionForm";
 
@@ -66,13 +66,10 @@ export default function EvolutionList() {
 
       <div className="space-y-2">
         {evolutions.map((evo) => (
-          <a
+          <Link
             key={evo.id}
-            href={`/evolutions/${evo.id}`}
-            onClick={(e) => {
-              e.preventDefault();
-              navigate(`/evolutions/${evo.id}`);
-            }}
+            to="/evolutions/$evoId"
+            params={{ evoId: String(evo.id) }}
             className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 bg-bg-surface border border-border-subtle rounded-lg hover:bg-bg-elevated hover:border-border transition-all no-underline text-inherit"
           >
             <StatusBadge status={evo.status} />
@@ -111,7 +108,7 @@ export default function EvolutionList() {
                 </button>
               )}
             </div>
-          </a>
+          </Link>
         ))}
         {evolutions.length === 0 && !showForm && (
           <p className="text-text-muted italic py-8 text-center">

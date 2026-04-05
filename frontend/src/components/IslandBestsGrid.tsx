@@ -1,4 +1,4 @@
-import { navigate } from "../router";
+import { Link } from "@tanstack/react-router";
 import type { CreatureInfo } from "../api";
 
 interface Props {
@@ -42,12 +42,13 @@ export default function IslandBestsGrid({ evoId, bestPerIsland }: Props) {
         const id = c.island_id ?? 0;
         const color = ISLAND_COLORS[id % ISLAND_COLORS.length];
         return (
-          <a
+          <Link
             key={c.id}
-            href={`/evolutions/${evoId}/creatures/${c.id}`}
-            onClick={(e) => {
-              e.preventDefault();
-              navigate(`/evolutions/${evoId}/creatures/${c.id}`);
+            to="/evolutions/$evoId/islands/$islandId/creatures/$creatureId"
+            params={{
+              evoId: String(evoId),
+              islandId: String(id),
+              creatureId: String(c.id),
             }}
             className="block rounded border border-border-subtle bg-bg-elevated hover:border-accent transition-colors p-2 no-underline text-inherit"
             style={{ borderLeftColor: color, borderLeftWidth: 3 }}
@@ -59,7 +60,7 @@ export default function IslandBestsGrid({ evoId, bestPerIsland }: Props) {
             <div className="text-sm font-mono text-text-primary">
               {formatFitness(c.fitness)}
             </div>
-          </a>
+          </Link>
         );
       })}
     </div>

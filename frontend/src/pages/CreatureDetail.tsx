@@ -9,7 +9,7 @@ import {
   type CreatureInfo,
   type PhenotypeInfo,
 } from "../api";
-import { navigate } from "../router";
+import { Link } from "@tanstack/react-router";
 import MorphologyGraph from "../components/MorphologyGraph";
 import PhenotypeGraph from "../components/PhenotypeGraph";
 import CreatureViewer from "../components/CreatureViewer";
@@ -27,9 +27,16 @@ function formatFitness(v: number): string {
 interface Props {
   evoId: number;
   creatureId: number;
+  islandId?: number;
 }
 
-export default function CreatureDetail({ evoId, creatureId }: Props) {
+const ISLAND_COLORS = [
+  "#4a9eff", "#ff7a45", "#52c41a", "#ff4d6d",
+  "#a855f7", "#14b8a6", "#eab308", "#ec4899",
+  "#06b6d4", "#f97316", "#84cc16", "#8b5cf6",
+];
+
+export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
   const [info, setInfo] = useState<GenotypeInfo | null>(null);
   const [phenotype, setPhenotype] = useState<PhenotypeInfo | null>(null);
   const [creature, setCreature] = useState<CreatureInfo | null>(null);
@@ -71,27 +78,34 @@ export default function CreatureDetail({ evoId, creatureId }: Props) {
     <div>
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-text-muted mb-4">
-        <a
-          href="/"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate("/");
-          }}
-          className="hover:text-text-secondary transition-colors"
-        >
+        <Link to="/" className="hover:text-text-secondary transition-colors">
           Dashboard
-        </a>
+        </Link>
         <span>/</span>
-        <a
-          href={`/evolutions/${evoId}`}
-          onClick={(e) => {
-            e.preventDefault();
-            navigate(`/evolutions/${evoId}`);
-          }}
+        <Link
+          to="/evolutions/$evoId"
+          params={{ evoId: String(evoId) }}
           className="hover:text-text-secondary transition-colors"
         >
           Evolution #{evoId}
-        </a>
+        </Link>
+        {islandId !== undefined && (
+          <>
+            <span>/</span>
+            <span
+              className="inline-flex items-center gap-1.5"
+              style={{ color: ISLAND_COLORS[islandId % ISLAND_COLORS.length] }}
+            >
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{
+                  background: ISLAND_COLORS[islandId % ISLAND_COLORS.length],
+                }}
+              />
+              Island {islandId}
+            </span>
+          </>
+        )}
         <span>/</span>
         <span className="text-text-secondary">Creature #{creatureId}</span>
       </div>

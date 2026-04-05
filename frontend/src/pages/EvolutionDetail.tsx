@@ -16,7 +16,7 @@ import {
   type IslandStats,
 } from "../api";
 import { useEvolutionUpdates } from "../hooks/useWebSocket";
-import { navigate } from "../router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import FitnessChart from "../components/FitnessChart";
 import IslandFitnessChart from "../components/IslandFitnessChart";
 import IslandBestsGrid from "../components/IslandBestsGrid";
@@ -37,6 +37,7 @@ interface Props {
 }
 
 export default function EvolutionDetail({ evoId }: Props) {
+  const navigate = useNavigate();
   const [evolution, setEvolution] = useState<Evolution | null>(null);
   const [bestCreatures, setBestCreatures] = useState<CreatureInfo[]>([]);
   const [bestPerIsland, setBestPerIsland] = useState<CreatureInfo[]>([]);
@@ -98,7 +99,7 @@ export default function EvolutionDetail({ evoId }: Props) {
   const handleDelete = async () => {
     if (!window.confirm("Are you sure you want to delete this evolution and all its creatures? This cannot be undone.")) return;
     await deleteEvolution(evoId);
-    navigate("/");
+    navigate({ to: "/" });
   };
 
   const handlePause = async () => {
@@ -124,16 +125,12 @@ export default function EvolutionDetail({ evoId }: Props) {
     <div>
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-text-muted mb-4">
-        <a
-          href="/"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate("/");
-          }}
+        <Link
+          to="/"
           className="hover:text-text-secondary transition-colors no-underline text-inherit"
         >
           Dashboard
-        </a>
+        </Link>
         <span>/</span>
         <span className="text-text-secondary">Evolution #{evoId}</span>
       </div>
@@ -247,29 +244,47 @@ export default function EvolutionDetail({ evoId }: Props) {
               Top Creatures
             </h2>
             <div className="space-y-1">
-              {bestCreatures.map((c) => (
-                <a
-                  key={c.id}
-                  href={`/evolutions/${evoId}/creatures/${c.id}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate(`/evolutions/${evoId}/creatures/${c.id}`);
-                  }}
-                  className="flex items-center justify-between px-3 py-2 rounded hover:bg-bg-elevated transition-colors no-underline text-inherit"
-                >
-                  <span className="text-sm font-mono">
-                    #{c.id}
-                    {c.island_id !== undefined && bestPerIsland.length > 0 && (
+              {bestCreatures.map((c) => {
+                const hasIsland =
+                  c.island_id !== undefined && bestPerIsland.length > 0;
+                return hasIsland ? (
+                  <Link
+                    key={c.id}
+                    to="/evolutions/$evoId/islands/$islandId/creatures/$creatureId"
+                    params={{
+                      evoId: String(evoId),
+                      islandId: String(c.island_id),
+                      creatureId: String(c.id),
+                    }}
+                    className="flex items-center justify-between px-3 py-2 rounded hover:bg-bg-elevated transition-colors no-underline text-inherit"
+                  >
+                    <span className="text-sm font-mono">
+                      #{c.id}
                       <span className="text-text-muted ml-2 text-xs">
                         i{c.island_id}
                       </span>
-                    )}
-                  </span>
-                  <span className="text-sm text-text-secondary">
-                    {formatFitness(c.fitness)}
-                  </span>
-                </a>
-              ))}
+                    </span>
+                    <span className="text-sm text-text-secondary">
+                      {formatFitness(c.fitness)}
+                    </span>
+                  </Link>
+                ) : (
+                  <Link
+                    key={c.id}
+                    to="/evolutions/$evoId/creatures/$creatureId"
+                    params={{
+                      evoId: String(evoId),
+                      creatureId: String(c.id),
+                    }}
+                    className="flex items-center justify-between px-3 py-2 rounded hover:bg-bg-elevated transition-colors no-underline text-inherit"
+                  >
+                    <span className="text-sm font-mono">#{c.id}</span>
+                    <span className="text-sm text-text-secondary">
+                      {formatFitness(c.fitness)}
+                    </span>
+                  </Link>
+                );
+              })}
               {bestCreatures.length === 0 && (
                 <p className="text-text-muted italic text-sm py-4 text-center">
                   No creatures yet.
