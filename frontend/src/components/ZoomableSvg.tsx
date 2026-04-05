@@ -11,15 +11,33 @@ interface Props {
 /**
  * Wraps its SVG content with wheel-to-zoom and drag-to-pan.
  *
- * Zoom anchors on the cursor position (like maps), so scrolling up on a
- * specific node zooms into that node. Panning simply shifts the content
- * in the currently-visible scale. A "Reset" button returns to scale=1.
+ * Zoom anchors on the cursor position (like maps): the content point under
+ * the mouse before the wheel event stays under the mouse after. Panning
+ * simply shifts the content. Reset returns to identity (k=1, x=0, y=0).
  *
- * Implementation: we apply a single `<g transform="translate(tx ty) scale(s)">`
- * wrapper around the children. Screen-pixel mouse deltas are converted to
- * viewBox-unit deltas using the SVG element's measured width, so pan speed
- * feels consistent regardless of container size.
+ * Implementation: we hold a single transform `{k, x, y}` — k is the zoom
+ * scale, (x, y) is the translation — and apply it as
+ * `<g transform="translate(x y) scale(k)">` around the children. The
+ * transform is in the SVG's viewBox coordinate system. Mouse events are
+ * converted into viewBox coordinates via svg.getScreenCTM().inverse(),
+ * which correctly handles preserveAspectRatio letterboxing.
+ *
+ * Keeping k/x/y in one state object is critical: d3-zoom does the same.
+ * Calling setScale + setTx + setTy as three separate calls (or nested
+ * updater functions) produces intermediate states where only k has
+ * updated but (x, y) haven't, which renders the transform incorrectly
+ * for one frame and makes the zoom visibly drift.
  */
+interface Transform {
+  k: number;
+  x: number;
+  y: number;
+}
+
+const IDENTITY: Transform = { k: 1, x: 0, y: 0 };
+const MIN_SCALE = 0.2;
+const MAX_SCALE = 8;
+
 export default function ZoomableSvg({
   viewBoxWidth,
   viewBoxHeight,
@@ -27,26 +45,25 @@ export default function ZoomableSvg({
   height = "500px",
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const [scale, setScale] = useState(1);
-  const [tx, setTx] = useState(0);
-  const [ty, setTy] = useState(0);
+  const [transform, setTransform] = useState<Transform>(IDENTITY);
+  const transformRef = useRef<Transform>(IDENTITY);
+  transformRef.current = transform;
+
   const [dragging, setDragging] = useState(false);
-  const dragStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(
+  const dragStart = useRef<{ mouseX: number; mouseY: number; x: number; y: number } | null>(
     null,
   );
 
   /**
-   * Convert a screen-space mouse event to viewBox-space coordinates.
-   * Uses getScreenCTM() which is the native SVG screen→viewBox matrix —
-   * correctly handles preserveAspectRatio letterboxing, element resizing,
-   * and CSS transforms on ancestors. This is what d3-zoom's `pointer()`
-   * does when operating on SVG targets.
+   * Convert a screen mouse event to viewBox coordinates using the SVG's
+   * own screen→viewBox matrix. Handles letterboxing, element resizing,
+   * and any ancestor CSS transforms correctly.
    */
-  const screenToSvg = (clientX: number, clientY: number): { x: number; y: number } => {
+  const screenToSvg = (clientX: number, clientY: number): { x: number; y: number } | null => {
     const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
+    if (!svg) return null;
     const ctm = svg.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
+    if (!ctm) return null;
     const pt = svg.createSVGPoint();
     pt.x = clientX;
     pt.y = clientY;
@@ -54,65 +71,75 @@ export default function ZoomableSvg({
     return { x: p.x, y: p.y };
   };
 
-  /**
-   * Convert a screen-pixel delta to a viewBox-unit delta for panning.
-   * With preserveAspectRatio="xMidYMid meet", both axes share a single
-   * uniform scale (the MIN of the per-axis scales), so we derive
-   * units-per-pixel from either axis via the inverse of the screen CTM.
-   */
-  const svgUnitsPerPixel = (): number => {
-    const svg = svgRef.current;
-    if (!svg) return 1;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return 1;
-    // CTM.a is the horizontal scale from viewBox-units to screen pixels.
-    // For uniformly-scaled SVGs a === d, so either works.
-    return 1 / ctm.a;
-  };
-
-  // Wheel handler must be non-passive to call preventDefault (prevents page
-  // scroll while zooming). React's onWheel is passive by default, so we
-  // attach via useEffect.
+  // Wheel handler must be non-passive to preventDefault (React onWheel is passive).
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Mouse position in SVG viewBox user units (d3-zoom equivalent).
-      const { x: mx, y: my } = screenToSvg(e.clientX, e.clientY);
+      const mouse = screenToSvg(e.clientX, e.clientY);
+      if (!mouse) return;
+      const current = transformRef.current;
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      setScale((prevScale) => {
-        const newScale = Math.min(Math.max(prevScale * factor, 0.2), 8);
-        const actualFactor = newScale / prevScale;
-        // Anchor the point under the mouse: content under mouse stays fixed.
-        //   displayed = content * k + t
-        //   content_under_mouse = (m - t) / k   (from old transform)
-        //   t_new = m - content_under_mouse * k_new
-        //         = m - (m - t_old) * (k_new / k_old)
-        setTx((prevTx) => mx - (mx - prevTx) * actualFactor);
-        setTy((prevTy) => my - (my - prevTy) * actualFactor);
-        return newScale;
+      const newK = Math.min(Math.max(current.k * factor, MIN_SCALE), MAX_SCALE);
+      if (newK === current.k) return; // hit a bound, nothing to do
+
+      // Anchor the content-point under the mouse at the same screen spot.
+      //
+      // Forward transform: displayed = content * k + (x, y)
+      //                  ⇒ content_under_mouse = (mouse - (x, y)) / k
+      //
+      // Constraint: after the zoom, the same content point must still be
+      // at the mouse position:
+      //   mouse = content_under_mouse * newK + (x_new, y_new)
+      //   (x_new, y_new) = mouse - content_under_mouse * newK
+      //                  = mouse - ((mouse - (x, y)) / k) * newK
+      //                  = mouse - (mouse - (x, y)) * (newK / k)
+      const r = newK / current.k;
+      setTransform({
+        k: newK,
+        x: mouse.x - (mouse.x - current.x) * r,
+        y: mouse.y - (mouse.y - current.y) * r,
       });
     };
 
     svg.addEventListener("wheel", onWheel, { passive: false });
     return () => svg.removeEventListener("wheel", onWheel);
-  }, [viewBoxWidth, viewBoxHeight]);
+  }, []);
 
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
+    // Record drag origin in screen pixels and the translation at drag start.
     setDragging(true);
-    dragStart.current = { x: e.clientX, y: e.clientY, tx, ty };
+    dragStart.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      x: transform.x,
+      y: transform.y,
+    };
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
     if (!dragging || !dragStart.current) return;
-    const k = svgUnitsPerPixel();
-    const dx = (e.clientX - dragStart.current.x) * k;
-    const dy = (e.clientY - dragStart.current.y) * k;
-    setTx(dragStart.current.tx + dx);
-    setTy(dragStart.current.ty + dy);
+    const svg = svgRef.current;
+    if (!svg) return;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
+    // Convert screen-pixel drag delta to viewBox-unit delta via CTM.a.
+    // For uniformly-scaled SVGs, CTM.a (horizontal pixel/unit) === CTM.d.
+    const unitsPerPixel = 1 / ctm.a;
+    const dx = (e.clientX - dragStart.current.mouseX) * unitsPerPixel;
+    const dy = (e.clientY - dragStart.current.mouseY) * unitsPerPixel;
+    setTransform({
+      k: transformRef.current.k,
+      x: dragStart.current.x + dx,
+      y: dragStart.current.y + dy,
+    });
   };
 
   const onMouseUp = () => {
@@ -120,11 +147,7 @@ export default function ZoomableSvg({
     dragStart.current = null;
   };
 
-  const reset = () => {
-    setScale(1);
-    setTx(0);
-    setTy(0);
-  };
+  const reset = () => setTransform(IDENTITY);
 
   return (
     <div className="relative" style={{ height }}>
@@ -140,11 +163,15 @@ export default function ZoomableSvg({
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
       >
-        <g transform={`translate(${tx} ${ty}) scale(${scale})`}>{children}</g>
+        <g
+          transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}
+        >
+          {children}
+        </g>
       </svg>
       <div className="absolute top-2 right-2 flex items-center gap-2">
         <span className="text-xs text-text-muted font-mono bg-bg-surface/80 px-1.5 py-0.5 rounded">
-          {(scale * 100).toFixed(0)}%
+          {(transform.k * 100).toFixed(0)}%
         </span>
         <button
           type="button"
