@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { initWasm, scene_init, scene_step, scene_body_count, scene_transforms } from "../wasm";
+import { initWasm, scene_init, scene_init_rapier, scene_step, scene_body_count, scene_transforms } from "../wasm";
 
 const DEMOS = [
   { name: "swimmer-starfish", label: "Swimming Starfish", env: "Water" },
@@ -18,6 +18,7 @@ const STRIDE = 10; // values per body
 export default function Viewer() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [currentDemo, setCurrentDemo] = useState(0);
+  const [useRapier, setUseRapier] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isComputing, setIsComputing] = useState(true);
   const stateRef = useRef<{
@@ -95,10 +96,12 @@ export default function Viewer() {
         scene.add(grid);
       }
 
-      // Init scene creature
+      // Init scene creature — Rapier or Featherstone
       let handle;
       try {
-        handle = scene_init(demo.name, demo.env);
+        handle = useRapier
+          ? scene_init_rapier(demo.name, demo.env)
+          : scene_init(demo.name, demo.env);
       } catch (e) {
         console.error("scene_init failed:", e);
         return;
@@ -189,7 +192,7 @@ export default function Viewer() {
         stateRef.current = null;
       }
     };
-  }, [currentDemo]);
+  }, [currentDemo, useRapier]);
 
   return (
     <div>
@@ -205,6 +208,17 @@ export default function Viewer() {
             </option>
           ))}
         </select>
+        <button
+          onClick={() => { setUseRapier(r => !r); setIsComputing(true); setProgress(0); }}
+          className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
+            useRapier
+              ? "bg-accent/20 border-accent text-accent"
+              : "bg-bg-surface border-border text-text-muted hover:border-accent hover:text-text-primary"
+          }`}
+          title="Toggle between Featherstone (default) and Rapier physics"
+        >
+          {useRapier ? "⚡ Rapier" : "Featherstone"}
+        </button>
         <span className="text-text-muted text-xs">Drag to orbit · Scroll to zoom</span>
       </div>
       <div

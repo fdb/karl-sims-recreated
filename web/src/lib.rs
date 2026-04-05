@@ -133,6 +133,15 @@ pub fn scene_init(name: &str, environment: &str) -> Result<SceneHandle, JsValue>
     Ok(SceneHandle { world, def })
 }
 
+/// Like `scene_init` but routes physics through the Rapier backend.
+/// Only available when the `rapier-physics` feature is enabled (always true in WASM builds).
+#[wasm_bindgen]
+pub fn scene_init_rapier(name: &str, environment: &str) -> Result<SceneHandle, JsValue> {
+    let mut handle = scene_init(name, environment)?;
+    handle.world.use_rapier = true;
+    Ok(handle)
+}
+
 /// List available scene names (comma-separated).
 #[wasm_bindgen]
 pub fn scene_list() -> String {

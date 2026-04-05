@@ -7,7 +7,7 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-karl-sims-core = { path = "../core" }
+karl-sims-core = { path = "../core", features = ["rapier-physics"] }
 glam = { version = "0.30", features = ["scalar-math"] }
 log = "0.4"
 wasm-bindgen = "0.2"
