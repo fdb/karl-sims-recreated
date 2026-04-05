@@ -413,6 +413,74 @@ impl DofAxesGlam for Joint {
     }
 }
 
+// ── Fitness helpers ───────────────────────────────────────────────────────────
+
+/// Evaluate swimming fitness using the Rapier physics backend.
+///
+/// Mirrors `fitness::evaluate_swimming_fitness` but routes `world.step()`
+/// through Rapier by setting `world.use_rapier = true` after creature creation.
+pub fn evaluate_swimming_fitness_rapier(
+    genome: &crate::genotype::GenomeGraph,
+    config: &crate::fitness::FitnessConfig,
+) -> crate::fitness::FitnessResult {
+    use crate::creature::Creature;
+    use crate::fitness::FitnessResult;
+
+    let mut creature = Creature::from_genome(genome.clone());
+    creature.world.water_enabled = true;
+    creature.world.water_viscosity = 2.0;
+    creature.world.gravity = DVec3::ZERO;
+    creature.world.use_rapier = true;
+
+    if creature.world.bodies.len() > config.max_parts {
+        return FitnessResult {
+            score: 0.0,
+            distance: 0.0,
+            max_displacement: 0.0,
+            terminated_early: true,
+        };
+    }
+
+    let dt = config.dt;
+    let total_steps = (config.sim_duration / dt).round() as usize;
+    let early_check_step = (config.early_termination_time / dt).round() as usize;
+    let initial_pos = creature.world.transforms[creature.world.root].translation;
+    let mut max_displacement: f64 = 0.0;
+
+    for step in 0..total_steps {
+        creature.step(dt);
+        let pos = creature.world.transforms[creature.world.root].translation;
+        let disp = (pos - initial_pos).length();
+        if !disp.is_finite() || disp > 1000.0 {
+            return FitnessResult {
+                score: 0.0,
+                distance: 0.0,
+                max_displacement: 0.0,
+                terminated_early: true,
+            };
+        }
+        max_displacement = max_displacement.max(disp);
+        if step + 1 == early_check_step && disp < config.min_movement {
+            return FitnessResult {
+                score: 0.0,
+                distance: 0.0,
+                max_displacement,
+                terminated_early: true,
+            };
+        }
+    }
+
+    let final_pos = creature.world.transforms[creature.world.root].translation;
+    let distance = (final_pos - initial_pos).length();
+    let score = distance * 0.7 + max_displacement * 0.3;
+    FitnessResult {
+        score,
+        distance,
+        max_displacement,
+        terminated_early: false,
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -484,5 +552,93 @@ mod tests {
         let y = transforms[0].translation.y;
         assert!(y < 1.5, "body should have landed; y={y:.3}");
         assert!(y > -0.5, "body should not be below ground; y={y:.3}");
+    }
+
+    // ── Milestone (d): fitness comparison against Featherstone ───────────────
+
+    /// Run both Featherstone and Rapier fitness evals on the same genome,
+    /// print the numbers, and assert basic sanity (non-NaN, non-negative).
+    ///
+    /// Uses a short sim (2s) for speed. The purpose is to verify Rapier
+    /// produces finite, plausible fitness numbers — not that it matches
+    /// Featherstone exactly (different physics → different numbers are expected).
+    #[test]
+    fn rapier_vs_featherstone_water_fitness() {
+        use crate::fitness::{evaluate_swimming_fitness, FitnessConfig};
+        use crate::genotype::GenomeGraph;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+
+        let config = FitnessConfig {
+            sim_duration: 2.0,
+            ..Default::default()
+        };
+
+        // Test across several seeds to get a statistical sample, not just one lucky creature.
+        let seeds = [7u64, 15, 23, 42, 77];
+        let mut rapier_scores = Vec::new();
+        let mut feather_scores = Vec::new();
+        let mut rapier_nans = 0usize;
+
+        for seed in seeds {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let genome = GenomeGraph::random(&mut rng);
+
+            // Featherstone baseline
+            let f_result = evaluate_swimming_fitness(&genome, &config);
+            feather_scores.push(f_result.score);
+
+            // Rapier
+            let r_result = evaluate_swimming_fitness_rapier(&genome, &config);
+            if !r_result.score.is_finite() {
+                rapier_nans += 1;
+            } else {
+                rapier_scores.push(r_result.score);
+            }
+
+            eprintln!(
+                "seed {:3}: feather={:.4} (early={}) | rapier={:.4} (early={})",
+                seed,
+                f_result.score, f_result.terminated_early,
+                r_result.score, r_result.terminated_early,
+            );
+        }
+
+        // Sanity checks
+        assert_eq!(rapier_nans, 0, "Rapier produced NaN/Inf scores on {rapier_nans} creatures");
+        assert!(
+            rapier_scores.iter().all(|&s| s >= 0.0),
+            "Rapier produced negative scores: {rapier_scores:?}"
+        );
+
+        let rapier_nonzero = rapier_scores.iter().filter(|&&s| s > 0.01).count();
+        let feather_nonzero = feather_scores.iter().filter(|&&s| s > 0.01).count();
+        eprintln!(
+            "Non-zero: feather={}/{} rapier={}/{}",
+            feather_nonzero, seeds.len(),
+            rapier_nonzero, seeds.len()
+        );
+    }
+
+    /// Rapier fitness evaluation should complete without panics on many random genomes.
+    #[test]
+    fn rapier_fitness_no_panic() {
+        use super::evaluate_swimming_fitness_rapier;
+        use crate::fitness::FitnessConfig;
+        use crate::genotype::GenomeGraph;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+
+        let config = FitnessConfig {
+            sim_duration: 1.0,
+            ..Default::default()
+        };
+        for seed in 0..10u64 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let genome = GenomeGraph::random(&mut rng);
+            let result = evaluate_swimming_fitness_rapier(&genome, &config);
+            assert!(result.score.is_finite() || result.terminated_early,
+                "seed {seed}: Rapier produced non-finite score and didn't terminate early");
+        }
     }
 }
