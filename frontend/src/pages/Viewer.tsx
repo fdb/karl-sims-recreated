@@ -79,9 +79,9 @@ export default function Viewer() {
       sun.position.set(6, 12, 8);
       sun.castShadow = true;
       scene.add(sun);
-      scene.add(Object.assign(new THREE.DirectionalLight(0x8ab4c0, 0.25), {
-        position: new THREE.Vector3(-4, 3, -6),
-      }));
+      const fill = new THREE.DirectionalLight(0x8ab4c0, 0.25);
+      fill.position.set(-4, 3, -6);
+      scene.add(fill);
 
       // Ground plane (shared, at y=0)
       const ground = new THREE.Mesh(
@@ -91,11 +91,9 @@ export default function Viewer() {
       ground.rotation.x = -Math.PI / 2;
       ground.receiveShadow = true;
       scene.add(ground);
-      scene.add(
-        Object.assign(new THREE.GridHelper(120, 60, 0x3a4a40, 0x2a3830), {
-          position: new THREE.Vector3(0, 0.003, 0),
-        })
-      );
+      const grid = new THREE.GridHelper(120, 60, 0x3a4a40, 0x2a3830);
+      grid.position.set(0, 0.003, 0);
+      scene.add(grid);
 
       // ── Labels ─────────────────────────────────────────────────────────────
       CREATURES.forEach((c, i) => {
