@@ -62,7 +62,6 @@ fn trial_state(base: &JointState, ks: &[JointDeriv], weights: &[f64], dt: f64) -
     base.advance(&wd, dt)
 }
 
-#[derive(Debug, Clone)]
 pub struct World {
     pub bodies: Vec<RigidBody>,
     pub joints: Vec<Joint>,
@@ -80,6 +79,51 @@ pub struct World {
     pub root_angular_velocity: DVec3,
     last_root_accel: SVec6,
     pub light_position: DVec3,
+    /// Route `step()` through the Rapier physics backend.
+    /// Only meaningful when the `rapier-physics` feature is enabled.
+    pub use_rapier: bool,
+    #[cfg(feature = "rapier-physics")]
+    rapier_state: Option<crate::rapier_world::RapierState>,
+}
+
+impl std::fmt::Debug for World {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("World")
+            .field("bodies", &self.bodies.len())
+            .field("joints", &self.joints.len())
+            .field("root", &self.root)
+            .field("time", &self.time)
+            .field("gravity", &self.gravity)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Clone for World {
+    fn clone(&self) -> Self {
+        Self {
+            bodies: self.bodies.clone(),
+            joints: self.joints.clone(),
+            transforms: self.transforms.clone(),
+            torques: self.torques.clone(),
+            root: self.root,
+            gravity: self.gravity,
+            time: self.time,
+            water_enabled: self.water_enabled,
+            water_viscosity: self.water_viscosity,
+            collisions_enabled: self.collisions_enabled,
+            ground_enabled: self.ground_enabled,
+            suggested_dt: self.suggested_dt,
+            root_velocity: self.root_velocity,
+            root_angular_velocity: self.root_angular_velocity,
+            last_root_accel: self.last_root_accel,
+            light_position: self.light_position,
+            use_rapier: self.use_rapier,
+            // Rapier state cannot be cloned — it will be lazily re-initialised
+            // on the first step() call of the cloned World.
+            #[cfg(feature = "rapier-physics")]
+            rapier_state: None,
+        }
+    }
 }
 
 impl World {
@@ -101,6 +145,9 @@ impl World {
             root_angular_velocity: DVec3::ZERO,
             last_root_accel: SVec6::ZERO,
             light_position: DVec3::new(5.0, 0.0, 0.0),
+            use_rapier: false,
+            #[cfg(feature = "rapier-physics")]
+            rapier_state: None,
         }
     }
 
@@ -440,6 +487,36 @@ impl World {
     }
 
     pub fn step(&mut self, frame_dt: f64) {
+        // ── Rapier physics backend (opt-in, feature-gated) ────────────────────
+        #[cfg(feature = "rapier-physics")]
+        if self.use_rapier {
+            // Lazy-init: build Rapier world from current body/joint/transform state.
+            if self.rapier_state.is_none() {
+                self.rapier_state = Some(crate::rapier_world::RapierState::build(
+                    &self.bodies,
+                    &self.joints,
+                    &self.transforms,
+                    self.root,
+                    self.gravity,
+                    self.ground_enabled,
+                    self.water_enabled,
+                ));
+            }
+            let rapier = self.rapier_state.as_mut().unwrap();
+            rapier.step(
+                frame_dt,
+                self.gravity,
+                &mut self.joints,
+                &self.torques,
+                &mut self.transforms,
+                self.water_enabled,
+                self.water_viscosity,
+                &self.bodies,
+            );
+            self.time += frame_dt;
+            return;
+        }
+
         let dof_map = self.dof_map();
 
         if !dof_map.is_empty() {
@@ -760,5 +837,57 @@ mod tests {
             world.step(dt);
         }
         assert!(world.joints[0].velocities[0].abs() < 1.0, "velocity: {}", world.joints[0].velocities[0]);
+    }
+
+    /// Rapier backend: two-body creature at y=2 should fall under gravity.
+    #[cfg(feature = "rapier-physics")]
+    #[test]
+    fn rapier_creature_falls_under_gravity() {
+        let mut world = make_two_body_world();
+        world.root = 0;
+        world.gravity = DVec3::new(0.0, -9.81, 0.0);
+        world.ground_enabled = true;
+        world.use_rapier = true;
+        world.set_root_transform(DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)));
+        world.forward_kinematics();
+
+        let dt = 1.0 / 60.0;
+        for _ in 0..120 {
+            world.step(dt);
+        }
+
+        let root_y = world.transforms[0].translation.y;
+        assert!(root_y < 1.8, "Rapier: body should have fallen from y=2, got y={root_y:.3}");
+        assert!(root_y > -0.5, "Rapier: body should not pass through ground, got y={root_y:.3}");
+    }
+
+    /// Rapier backend: water creature stays near surface (no gravity, has drag).
+    #[cfg(feature = "rapier-physics")]
+    #[test]
+    fn rapier_water_creature_stable() {
+        let mut world = World::new();
+        let root = world.add_body(DVec3::new(0.5, 0.3, 0.3));
+        let child = world.add_body(DVec3::new(0.3, 0.2, 0.2));
+        world.root = root;
+        world.gravity = DVec3::ZERO;
+        world.water_enabled = true;
+        world.water_viscosity = 2.0;
+        world.use_rapier = true;
+
+        let joint = Joint::revolute(root, child,
+            DVec3::new(0.5, 0.0, 0.0), DVec3::new(-0.3, 0.0, 0.0), DVec3::Z);
+        world.add_joint(joint);
+        world.torques[0][0] = 1.0;
+        world.set_root_transform(DAffine3::IDENTITY);
+        world.forward_kinematics();
+
+        let dt = 1.0 / 60.0;
+        for _ in 0..120 {
+            world.step(dt);
+        }
+
+        let root_pos = world.transforms[0].translation;
+        assert!(root_pos.length() < 10.0, "Rapier water: creature exploded to {root_pos:?}");
+        assert!(root_pos.length().is_finite(), "Rapier water: NaN/Inf position");
     }
 }
