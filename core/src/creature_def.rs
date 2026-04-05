@@ -112,6 +112,11 @@ impl CreatureDefinition {
             world.add_joint(joint);
         }
 
+        // Place child bodies so joint anchors coincide. Without this the
+        // Rapier backend (which treats poses as authoritative) sees every
+        // body at the origin and applies huge corrective impulses in frame 1.
+        world.forward_kinematics();
+
         world
     }
 
@@ -154,7 +159,6 @@ pub fn simulate(
         "land" | "Land" => {
             world.water_enabled = false;
             world.gravity = DVec3::new(0.0, -gravity, 0.0);
-            world.collisions_enabled = true;
             world.ground_enabled = true;
             // Raise root above ground
             world.set_root_transform(

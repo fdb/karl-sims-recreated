@@ -26,7 +26,6 @@ pub fn sim_init(genome_bytes: &[u8], environment: &str) -> Result<SimHandle, JsV
         "Land" => {
             creature.world.water_enabled = false;
             creature.world.gravity = glam::DVec3::new(0.0, -9.81, 0.0);
-            creature.world.collisions_enabled = true;
             creature.world.ground_enabled = true;
             creature.world.set_root_transform(
                 glam::DAffine3::from_translation(glam::DVec3::new(0.0, 2.0, 0.0)),
@@ -48,12 +47,12 @@ pub fn sim_init(genome_bytes: &[u8], environment: &str) -> Result<SimHandle, JsV
 /// where p = position, q = quaternion (w first), h = half_extents.
 #[wasm_bindgen]
 pub fn sim_step(handle: &mut SimHandle) -> Vec<f64> {
-    handle.creature.step_fast(1.0 / 60.0);
+    handle.creature.step(1.0 / 60.0);
     collect_transforms(&handle.creature)
 }
 
-/// Advance simulation using the accurate RK45 integrator (same as fitness evaluation).
-/// Slower than sim_step but numerically stable — use for pre-computing playback frames.
+/// Advance simulation by one frame. Alias for `sim_step` kept for backward
+/// compatibility with the `sim_step_accurate` JS callsite.
 #[wasm_bindgen]
 pub fn sim_step_accurate(handle: &mut SimHandle) -> Vec<f64> {
     handle.creature.step(1.0 / 60.0);
@@ -116,7 +115,6 @@ pub fn scene_init(name: &str, environment: &str) -> Result<SceneHandle, JsValue>
         "Land" => {
             world.water_enabled = false;
             world.gravity = glam::DVec3::new(0.0, -9.81, 0.0);
-            world.collisions_enabled = true;
             world.ground_enabled = true;
             world.set_root_transform(
                 glam::DAffine3::from_translation(glam::DVec3::new(0.0, 2.0, 0.0)),
@@ -131,6 +129,13 @@ pub fn scene_init(name: &str, environment: &str) -> Result<SceneHandle, JsValue>
     }
 
     Ok(SceneHandle { world, def })
+}
+
+/// Deprecated: alias for `scene_init`. Kept so the TypeScript bindings
+/// don't break while the viewer transitions away from the toggle UI.
+#[wasm_bindgen]
+pub fn scene_init_rapier(name: &str, environment: &str) -> Result<SceneHandle, JsValue> {
+    scene_init(name, environment)
 }
 
 /// List available scene names (comma-separated).

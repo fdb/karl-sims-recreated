@@ -1,12 +1,4 @@
 use glam::DVec3;
-use crate::spatial::SMat6;
-
-#[derive(Debug, Clone, Copy)]
-pub struct BoxFace {
-    pub center: DVec3,  // face center in local body frame
-    pub normal: DVec3,  // outward normal in local body frame
-    pub area: f64,      // face area
-}
 
 #[derive(Debug, Clone)]
 pub struct RigidBody {
@@ -29,22 +21,6 @@ impl RigidBody {
             mass,
             inertia_diag: DVec3::new(ixx, iyy, izz),
         }
-    }
-
-    pub fn faces(&self) -> [BoxFace; 6] {
-        let h = self.half_extents;
-        [
-            BoxFace { center: DVec3::new( h.x, 0.0, 0.0), normal: DVec3::X,     area: 4.0 * h.y * h.z },
-            BoxFace { center: DVec3::new(-h.x, 0.0, 0.0), normal: DVec3::NEG_X, area: 4.0 * h.y * h.z },
-            BoxFace { center: DVec3::new(0.0,  h.y, 0.0), normal: DVec3::Y,     area: 4.0 * h.x * h.z },
-            BoxFace { center: DVec3::new(0.0, -h.y, 0.0), normal: DVec3::NEG_Y, area: 4.0 * h.x * h.z },
-            BoxFace { center: DVec3::new(0.0, 0.0,  h.z), normal: DVec3::Z,     area: 4.0 * h.x * h.y },
-            BoxFace { center: DVec3::new(0.0, 0.0, -h.z), normal: DVec3::NEG_Z, area: 4.0 * h.x * h.y },
-        ]
-    }
-
-    pub fn spatial_inertia(&self) -> SMat6 {
-        SMat6::from_body_inertia(self.inertia_diag, self.mass)
     }
 }
 

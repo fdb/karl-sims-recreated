@@ -3,7 +3,6 @@
 /// Usage:
 ///   cargo run --bin karl-sims-debug -- --evolution 1 --creature 14201
 ///   cargo run --bin karl-sims-debug -- --evolution 1 --creature 14201 --output trace.json
-///   cargo run --bin karl-sims-debug -- --evolution 1 --creature 14201 --fast
 ///   cargo run --bin karl-sims-debug -- --db /path/to/karl-sims.db --evolution 1 --creature 14201
 use std::path::PathBuf;
 
@@ -68,7 +67,6 @@ fn main() {
         Environment::Land => {
             creature.world.water_enabled = false;
             creature.world.gravity = glam::DVec3::new(0.0, -params.gravity, 0.0);
-            creature.world.collisions_enabled = true;
             creature.world.ground_enabled = true;
             creature.world.set_root_transform(
                 glam::DAffine3::from_translation(glam::DVec3::new(0.0, 2.0, 0.0)),
@@ -87,9 +85,8 @@ fn main() {
 
     let dt = 1.0 / 60.0;
     let total_steps = (params.sim_duration / dt).round() as usize;
-    eprintln!("Simulating {} steps ({:.1}s) using {}",
+    eprintln!("Simulating {} steps ({:.1}s) using Rapier",
         total_steps, params.sim_duration,
-        if opts.fast { "step_fast (Euler)" } else { "step (RK45)" }
     );
 
     // ── run simulation, collect per-frame data ──────────────────────────────
@@ -103,11 +100,7 @@ fn main() {
     let initial_pos = creature.world.transforms[creature.world.root].translation;
 
     for step in 0..total_steps {
-        if opts.fast {
-            creature.step_fast(dt);
-        } else {
-            creature.step(dt);
-        }
+        creature.step(dt);
 
         let frame_json = collect_frame_json(&creature, step + 1);
 
@@ -179,7 +172,7 @@ fn main() {
     }
 
     // Print frame 1 transforms (first step — what the viewer shows as initial)
-    eprintln!("\n--- Frame 1 transforms (after first step_fast) ---");
+    eprintln!("\n--- Frame 1 transforms (after first step) ---");
     if frames.len() > 1 {
         if let Some(bodies) = frames[1]["bodies"].as_array() {
             for (i, b) in bodies.iter().enumerate().take(10) {
@@ -205,7 +198,7 @@ fn main() {
             "dt": dt,
             "first_nan_frame": first_nan_frame,
             "displacement": displacement,
-            "integrator": if opts.fast { "euler" } else { "rk45" },
+            "integrator": "rapier",
             "environment": format!("{:?}", params.environment),
             "water_enabled": creature.world.water_enabled,
             "water_viscosity": creature.world.water_viscosity,
@@ -250,7 +243,6 @@ struct Opts {
     evolution_id: i64,
     creature_id: i64,
     output: Option<PathBuf>,
-    fast: bool,
     verbose: bool,
 }
 
@@ -259,7 +251,6 @@ fn parse_args(args: &[String]) -> Opts {
     let mut evolution_id: Option<i64> = None;
     let mut creature_id: Option<i64> = None;
     let mut output = None;
-    let mut fast = false;
     let mut verbose = false;
 
     let mut i = 1;
@@ -269,10 +260,9 @@ fn parse_args(args: &[String]) -> Opts {
             "--evolution" | "-e" => { evolution_id = Some(args[i + 1].parse().expect("invalid evolution id")); i += 2; }
             "--creature" | "-c" => { creature_id = Some(args[i + 1].parse().expect("invalid creature id")); i += 2; }
             "--output" | "-o" => { output = Some(PathBuf::from(&args[i + 1])); i += 2; }
-            "--fast" => { fast = true; i += 1; }
             "--verbose" | "-v" => { verbose = true; i += 1; }
             "--help" | "-h" => {
-                eprintln!("Usage: karl-sims-debug --evolution ID --creature ID [--output trace.json] [--db path] [--fast] [--verbose]");
+                eprintln!("Usage: karl-sims-debug --evolution ID --creature ID [--output trace.json] [--db path] [--verbose]");
                 std::process::exit(0);
             }
             _ => { eprintln!("Unknown arg: {}", args[i]); i += 1; }
@@ -284,7 +274,6 @@ fn parse_args(args: &[String]) -> Opts {
         evolution_id: evolution_id.expect("--evolution required"),
         creature_id: creature_id.expect("--creature required"),
         output,
-        fast,
         verbose,
     }
 }

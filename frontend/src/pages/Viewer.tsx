@@ -1,52 +1,67 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { initWasm, scene_init, scene_step, scene_body_count, scene_transforms } from "../wasm";
+import {
+  initWasm,
+  scene_init, scene_init_rapier,
+  scene_step, scene_body_count, scene_transforms,
+} from "../wasm";
 
-const DEMOS = [
-  { name: "swimmer-starfish", label: "Swimming Starfish", env: "Water" },
-  { name: "swimmer-snake", label: "Swimming Snake", env: "Water" },
-  { name: "walker-inchworm", label: "Land Inchworm", env: "Land" },
-  { name: "walker-lizard", label: "Sprawling Lizard", env: "Land" },
+// Four creatures shown simultaneously, spaced apart on X axis
+const CREATURES = [
+  { name: "swimmer-starfish", label: "Starfish", env: "Water" },
+  { name: "swimmer-snake",    label: "Snake",    env: "Water" },
+  { name: "walker-inchworm",  label: "Inchworm", env: "Land"  },
+  { name: "walker-lizard",    label: "Lizard",   env: "Land"  },
 ];
 
-const SIM_DURATION = 10.0;
-const DT = 1.0 / 60.0;
-const TOTAL_FRAMES = Math.round(SIM_DURATION / DT);
-const STRIDE = 10; // values per body
+const SPACING = 6; // world-space X offset between creatures
+const STRIDE  = 10; // floats per body: px py pz qw qx qy qz hx hy hz
+
+// Position offsets so creatures don't overlap
+const OFFSETS: THREE.Vector3[] = CREATURES.map(
+  (_, i) => new THREE.Vector3((i - (CREATURES.length - 1) / 2) * SPACING, 0, 0)
+);
 
 export default function Viewer() {
-  const mountRef = useRef<HTMLDivElement>(null);
-  const [currentDemo, setCurrentDemo] = useState(0);
-  const [progress, setProgress] = useState(0);
-  const [isComputing, setIsComputing] = useState(true);
-  const stateRef = useRef<{
-    renderer: THREE.WebGLRenderer;
-    animId: number;
-  } | null>(null);
+  const mountRef  = useRef<HTMLDivElement>(null);
+  const [useRapier, setUseRapier] = useState(false);
+  const [paused,    setPaused]    = useState(false);
+  // Use refs for values that need to be read inside the rAF closure without re-creating it
+  const pausedRef   = useRef(false);
+  const useRapierRef = useRef(false);
+
+  // Keep refs in sync with state
+  useEffect(() => { pausedRef.current   = paused;    }, [paused]);
+  useEffect(() => { useRapierRef.current = useRapier; }, [useRapier]);
+
+  // restartKey increments to force a full sim re-init
+  const [restartKey, setRestartKey] = useState(0);
 
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-    let cancelled = false;
+    let animId = 0;
+    let disposed = false;
+    let rendererRef: THREE.WebGLRenderer | null = null;
 
     (async () => {
       await initWasm();
-      if (cancelled) return;
+      if (disposed) return;
 
-      const demo = DEMOS[currentDemo];
-
-      // Scene
+      // ── Scene setup ────────────────────────────────────────────────────────
       const scene = new THREE.Scene();
-      const bgColor = demo.env === "Water" ? 0x0d1e2e : 0x1a2a30;
-      scene.background = new THREE.Color(bgColor);
-      scene.fog = new THREE.Fog(bgColor, 30, 120);
+      scene.background = new THREE.Color(0x111820);
+      scene.fog = new THREE.Fog(0x111820, 40, 120);
 
-      const camera = new THREE.PerspectiveCamera(45, mount.clientWidth / mount.clientHeight, 0.01, 100);
-      camera.position.set(3, 2.5, 5);
-      camera.lookAt(0, 0, 0);
+      const camera = new THREE.PerspectiveCamera(
+        45, mount.clientWidth / mount.clientHeight, 0.01, 200
+      );
+      camera.position.set(0, 4, 18);
+      camera.lookAt(0, 1, 0);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
+      rendererRef = renderer;
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(mount.clientWidth, mount.clientHeight);
       renderer.shadowMap.enabled = true;
@@ -54,90 +69,84 @@ export default function Viewer() {
       mount.appendChild(renderer.domElement);
 
       const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 1, 0);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
 
       // Lighting
-      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-      const sun = new THREE.DirectionalLight(0xfff5e0, 1.2);
-      sun.position.set(4, 8, 5);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+      const sun = new THREE.DirectionalLight(0xfff5e0, 1.1);
+      sun.position.set(6, 12, 8);
       sun.castShadow = true;
       scene.add(sun);
-      const fill = new THREE.DirectionalLight(0x8ab4c0, 0.3);
-      fill.position.set(-3, 2, -4);
+      const fill = new THREE.DirectionalLight(0x8ab4c0, 0.25);
+      fill.position.set(-4, 3, -6);
       scene.add(fill);
 
-      // Ground/water plane
-      if (demo.env === "Land") {
-        const checker = buildCheckerTexture();
-        const ground = new THREE.Mesh(
-          new THREE.PlaneGeometry(80, 80),
-          new THREE.MeshLambertMaterial({ map: checker })
-        );
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.y = 0;
-        ground.receiveShadow = true;
-        scene.add(ground);
-        const grid = new THREE.GridHelper(80, 40, 0x4a5a50, 0x3a4a40);
-        grid.position.y = 0.002;
-        scene.add(grid);
-      } else {
-        const waterMat = new THREE.MeshLambertMaterial({
-          color: 0x1a5080, transparent: true, opacity: 0.35, side: THREE.DoubleSide,
-        });
-        const water = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), waterMat);
-        water.rotation.x = -Math.PI / 2;
-        scene.add(water);
-        const grid = new THREE.GridHelper(80, 40, 0x2a6090, 0x1a4060);
-        (grid.material as THREE.LineBasicMaterial).transparent = true;
-        (grid.material as THREE.LineBasicMaterial).opacity = 0.4;
-        grid.position.y = 0.01;
-        scene.add(grid);
+      // Ground plane (shared, at y=0)
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(120, 120),
+        new THREE.MeshLambertMaterial({ map: buildCheckerTexture() })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+      const grid = new THREE.GridHelper(120, 60, 0x3a4a40, 0x2a3830);
+      grid.position.set(0, 0.003, 0);
+      scene.add(grid);
+
+      // ── Labels ─────────────────────────────────────────────────────────────
+      CREATURES.forEach((c, i) => {
+        const sprite = makeLabel(`${c.label} (${c.env})`, useRapierRef.current ? "⚡" : "");
+        sprite.position.set(OFFSETS[i].x, 3.5, 0);
+        scene.add(sprite);
+      });
+
+      // ── Init sim handles ───────────────────────────────────────────────────
+      type Handle = ReturnType<typeof scene_init>;
+      const handles: Handle[] = [];
+      const meshGroups: THREE.Mesh[][] = [];
+
+      const bodyMats = [
+        new THREE.MeshLambertMaterial({ color: 0xd4c8b8 }), // starfish
+        new THREE.MeshLambertMaterial({ color: 0xb8c8d4 }), // snake
+        new THREE.MeshLambertMaterial({ color: 0xc8d4b8 }), // inchworm
+        new THREE.MeshLambertMaterial({ color: 0xd4b8c8 }), // lizard
+      ];
+
+      for (let ci = 0; ci < CREATURES.length; ci++) {
+        const c = CREATURES[ci];
+        let h: Handle;
+        try {
+          h = useRapierRef.current
+            ? scene_init_rapier(c.name, c.env)
+            : scene_init(c.name, c.env);
+        } catch (e) {
+          console.error(`Failed to init ${c.name}:`, e);
+          continue;
+        }
+        handles.push(h);
+
+        const count = scene_body_count(h);
+        const group: THREE.Mesh[] = [];
+        for (let bi = 0; bi < count; bi++) {
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            bodyMats[ci]
+          );
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          scene.add(mesh);
+          group.push(mesh);
+        }
+        meshGroups.push(group);
+
+        // Apply initial positions with creature offset
+        const t = scene_transforms(h);
+        applyTransforms(t, group, OFFSETS[ci]);
       }
 
-      // Init scene creature
-      let handle;
-      try {
-        handle = scene_init(demo.name, demo.env);
-      } catch (e) {
-        console.error("scene_init failed:", e);
-        return;
-      }
-
-      const bodyCount = scene_body_count(handle);
-      const bodyMat = new THREE.MeshLambertMaterial({ color: 0xeae5d9 });
-      const meshes: THREE.Mesh[] = [];
-      for (let i = 0; i < bodyCount; i++) {
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), bodyMat);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        scene.add(mesh);
-        meshes.push(mesh);
-      }
-
-      // Initial state
-      const initialTransforms = scene_transforms(handle);
-      applyTransforms(initialTransforms, meshes);
-
-      // Auto-fit camera
-      const box = new THREE.Box3();
-      scene.updateMatrixWorld(true);
-      for (const mesh of meshes) box.expandByObject(mesh);
-      if (!box.isEmpty()) {
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        const maxDim = Math.max(size.x, size.y, size.z, 0.5);
-        const dist = maxDim * 3.5;
-        controls.target.copy(center);
-        camera.position.set(center.x + dist, center.y + dist * 0.6, center.z + dist);
-        camera.lookAt(center);
-        camera.updateProjectionMatrix();
-        controls.update();
-      }
-
-      // Resize
+      // ── Resize observer ────────────────────────────────────────────────────
       const resizeObs = new ResizeObserver(() => {
         camera.aspect = mount.clientWidth / mount.clientHeight;
         camera.updateProjectionMatrix();
@@ -145,92 +154,123 @@ export default function Viewer() {
       });
       resizeObs.observe(mount);
 
-      renderer.render(scene, camera);
-
-      // Pre-compute all frames
-      const allFrames: Float64Array[] = [initialTransforms.slice()];
-      const BATCH_SIZE = 30;
-      for (let start = 0; start < TOTAL_FRAMES; start += BATCH_SIZE) {
-        if (cancelled) return;
-        await new Promise<void>((r) => setTimeout(r, 0));
-
-        const end = Math.min(start + BATCH_SIZE, TOTAL_FRAMES);
-        for (let i = start; i < end; i++) {
-          const t = scene_step(handle);
-          allFrames.push(t.slice());
-        }
-        setProgress(end / TOTAL_FRAMES);
-        renderer.render(scene, camera);
-      }
-
-      if (cancelled) return;
-      setIsComputing(false);
-
-      // Playback loop
-      let frameIdx = 0;
-      let animId: number;
+      // ── Real-time game loop ────────────────────────────────────────────────
       const animate = () => {
+        if (disposed) return;
         animId = requestAnimationFrame(animate);
-        frameIdx = (frameIdx + 1) % allFrames.length;
-        applyTransforms(allFrames[frameIdx], meshes);
+
+        if (!pausedRef.current) {
+          for (let ci = 0; ci < handles.length; ci++) {
+            try {
+              const t = scene_step(handles[ci]);
+              applyTransforms(t, meshGroups[ci], OFFSETS[ci]);
+            } catch (e) {
+              console.error(`Step error on creature ${ci}:`, e);
+            }
+          }
+        }
+
         controls.update();
         renderer.render(scene, camera);
       };
       animId = requestAnimationFrame(animate);
-      stateRef.current = { renderer, animId };
+
     })();
 
     return () => {
-      cancelled = true;
-      if (stateRef.current) {
-        cancelAnimationFrame(stateRef.current.animId);
-        stateRef.current.renderer.dispose();
-        stateRef.current.renderer.domElement.remove();
-        stateRef.current = null;
+      disposed = true;
+      cancelAnimationFrame(animId);
+      if (rendererRef) {
+        rendererRef.dispose();
+        rendererRef.domElement.remove();
+        rendererRef = null;
       }
     };
-  }, [currentDemo]);
+  // restartKey changes when user clicks Restart or toggles Rapier
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restartKey]);
+
+  const handleToggleRapier = () => {
+    setUseRapier(r => !r);
+    setRestartKey(k => k + 1);
+  };
+
+  const handleRestart = () => setRestartKey(k => k + 1);
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-4">
-        <select
-          value={currentDemo}
-          onChange={(e) => { setCurrentDemo(Number(e.target.value)); setIsComputing(true); setProgress(0); }}
-          className="px-3 py-1.5 bg-bg-surface border border-border rounded-md text-sm text-text-primary focus:outline-none focus:border-accent"
+      <div className="flex items-center gap-3 mb-4">
+        <button
+          onClick={() => setPaused(p => !p)}
+          className="px-3 py-1.5 text-sm rounded-md border border-border bg-bg-surface text-text-primary hover:border-accent transition-colors"
         >
-          {DEMOS.map((d, i) => (
-            <option key={d.name} value={i}>
-              {d.label} ({d.env})
-            </option>
-          ))}
-        </select>
-        <span className="text-text-muted text-xs">Drag to orbit · Scroll to zoom</span>
+          {paused ? "▶ Play" : "⏸ Pause"}
+        </button>
+        <button
+          onClick={handleRestart}
+          className="px-3 py-1.5 text-sm rounded-md border border-border bg-bg-surface text-text-muted hover:border-accent hover:text-text-primary transition-colors"
+        >
+          ↺ Restart
+        </button>
+        <button
+          onClick={handleToggleRapier}
+          className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
+            useRapier
+              ? "bg-accent/20 border-accent text-accent"
+              : "bg-bg-surface border-border text-text-muted hover:border-accent hover:text-text-primary"
+          }`}
+        >
+          {useRapier ? "⚡ Rapier" : "Featherstone"}
+        </button>
+        <span className="text-text-muted text-xs">
+          {CREATURES.map(c => c.label).join(" · ")} · Drag to orbit
+        </span>
       </div>
       <div
         ref={mountRef}
-        className="bg-bg-surface border border-border-subtle rounded-lg overflow-hidden relative"
+        className="bg-bg-surface border border-border-subtle rounded-lg overflow-hidden"
         style={{ height: "600px" }}
-      >
-        {isComputing && (
-          <div
-            style={{
-              position: "absolute", bottom: 0, left: 0, right: 0,
-              padding: "8px 12px", background: "rgba(0,0,0,0.5)",
-              display: "flex", alignItems: "center", gap: 8, zIndex: 10,
-            }}
-          >
-            <div style={{ flex: 1, height: 4, background: "#2a3d44", borderRadius: 2, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${progress * 100}%`, background: "#4a9eca", borderRadius: 2, transition: "width 0.1s" }} />
-            </div>
-            <span style={{ color: "#aac", fontSize: 11, whiteSpace: "nowrap" }}>
-              {Math.round(progress * 100)}%
-            </span>
-          </div>
-        )}
-      </div>
+      />
     </div>
   );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function applyTransforms(
+  data: Float64Array,
+  meshes: THREE.Mesh[],
+  offset: THREE.Vector3
+) {
+  for (let i = 0; i < meshes.length; i++) {
+    const b = i * STRIDE;
+    const px = data[b], py = data[b + 1], pz = data[b + 2];
+
+    // Guard against NaN/Inf — keep last known good position
+    if (!isFinite(px) || !isFinite(py) || !isFinite(pz)) continue;
+
+    meshes[i].position.set(px + offset.x, py + offset.y, pz + offset.z);
+    meshes[i].quaternion.set(data[b + 4], data[b + 5], data[b + 6], data[b + 3]);
+    meshes[i].scale.set(data[b + 7] * 2, data[b + 8] * 2, data[b + 9] * 2);
+  }
+}
+
+function makeLabel(text: string, badge: string): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 48;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "rgba(0,0,0,0)";
+  ctx.fillRect(0, 0, 256, 48);
+  ctx.font = "bold 18px sans-serif";
+  ctx.fillStyle = badge ? "#7accff" : "#aabbcc";
+  ctx.textAlign = "center";
+  ctx.fillText((badge ? badge + " " : "") + text, 128, 30);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(4, 0.75, 1);
+  return sprite;
 }
 
 function buildCheckerTexture(): THREE.CanvasTexture {
@@ -243,22 +283,12 @@ function buildCheckerTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext("2d")!;
   for (let r = 0; r < tileCount; r++) {
     for (let c = 0; c < tileCount; c++) {
-      ctx.fillStyle = (r + c) % 2 === 0 ? "#5a5248" : "#2e2b27";
+      ctx.fillStyle = (r + c) % 2 === 0 ? "#3a3733" : "#252320";
       ctx.fillRect(c * tileSize, r * tileSize, tileSize, tileSize);
     }
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(12, 12);
+  tex.repeat.set(20, 20);
   return tex;
-}
-
-function applyTransforms(data: Float64Array, meshes: THREE.Mesh[]) {
-  const STRIDE = 10;
-  for (let i = 0; i < meshes.length; i++) {
-    const b = i * STRIDE;
-    meshes[i].position.set(data[b], data[b + 1], data[b + 2]);
-    meshes[i].quaternion.set(data[b + 4], data[b + 5], data[b + 6], data[b + 3]);
-    meshes[i].scale.set(data[b + 7] * 2, data[b + 8] * 2, data[b + 9] * 2);
-  }
 }

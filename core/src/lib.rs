@@ -1,13 +1,8 @@
 pub mod body;
 pub mod joint;
 pub mod world;
-pub mod scene;
+pub mod rapier_world;
 pub mod creature_def;
-pub mod spatial;
-pub mod featherstone;
-pub mod water;
-pub mod collision;
-pub mod integrator;
 pub mod genotype;
 pub mod mutation;
 pub mod phenotype;
