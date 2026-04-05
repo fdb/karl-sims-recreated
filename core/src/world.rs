@@ -77,7 +77,14 @@ impl World {
             water_enabled: false,
             water_viscosity: 2.0,
             ground_enabled: false,
-            light_position: DVec3::new(5.0, 0.0, 0.0),
+            // Default light at the origin. For SwimmingSpeed goal this is
+            // inert (photosensor reads the direction *toward* origin, which
+            // has no fitness relevance). For LightFollowing, the fitness
+            // evaluator overrides this per trial. The previous default of
+            // (5,0,0) gave SwimmingSpeed creatures an accidental compass
+            // pointing off-axis, which evolution could exploit to maintain
+            // a consistent heading without any real "navigation" ability.
+            light_position: DVec3::ZERO,
             rapier_state: None,
         }
     }

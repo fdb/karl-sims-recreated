@@ -66,10 +66,21 @@ fn mutate_node_params<R: Rng>(genome: &mut GenomeGraph, rng: &mut R, scale: f64)
             node.joint_type = random_joint_type(rng);
         }
 
-        // Joint limits: Gaussian perturbation
+        // Joint limits: Gaussian perturbation. Enforce a minimum range of
+        // 0.2 rad so joints can never be "locked" by evolution — a locked
+        // joint + constant effector = torque-against-wall exploit.
+        const MIN_JOINT_RANGE: f64 = 0.2;
         for i in 0..3 {
-            node.joint_limit_min[i] = perturb(rng, node.joint_limit_min[i], scale).clamp(-3.14, 0.0);
-            node.joint_limit_max[i] = perturb(rng, node.joint_limit_max[i], scale).clamp(0.0, 3.14);
+            let mut lo = perturb(rng, node.joint_limit_min[i], scale).clamp(-3.14, 0.0);
+            let mut hi = perturb(rng, node.joint_limit_max[i], scale).clamp(0.0, 3.14);
+            if hi - lo < MIN_JOINT_RANGE {
+                // Widen symmetrically.
+                let mid = (lo + hi) / 2.0;
+                lo = (mid - MIN_JOINT_RANGE / 2.0).clamp(-3.14, 0.0);
+                hi = (mid + MIN_JOINT_RANGE / 2.0).clamp(0.0, 3.14);
+            }
+            node.joint_limit_min[i] = lo;
+            node.joint_limit_max[i] = hi;
         }
 
         // Recursive limit: occasionally ±1, clamp [1, 5]
@@ -309,8 +320,9 @@ fn mutate_brain<R: Rng>(brain: &mut BrainGraph, rng: &mut R, scale: f64) {
         effector.weight = perturb(rng, effector.weight, scale).clamp(-2.0, 2.0);
     }
 
-    // With small probability, add a new neuron.
-    if rng.r#gen::<f64>() < 0.1 * scale {
+    // With small probability, add a new neuron (capped at 16 per node to
+    // prevent genome bloat — deeper chains add latency without benefit).
+    if rng.r#gen::<f64>() < 0.1 * scale && brain.neurons.len() < 16 {
         let new_n = brain.neurons.len();
         let input = random_neuron_input(rng, new_n);
         let weight = rng.gen_range(-1.0..1.0);

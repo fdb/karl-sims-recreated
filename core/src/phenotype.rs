@@ -106,7 +106,14 @@ pub fn develop(genome: &GenomeGraph) -> Phenotype {
             let child_depth = depth + 1;
 
             // Compute child half-extents: node dimensions scaled by connection scale, halved.
-            let child_half_extents = target_node.dimensions * conn.scale * 0.5;
+            // Clamp each axis to a minimum of 0.03 m (3 cm) so bodies are large
+            // enough for Rapier's contact solver to handle cleanly. Without this
+            // floor, dim 0.05 × scale 0.3 × 0.5 = 0.0075 m (7.5 mm) — well
+            // below the solver's comfort zone, causing jittery contacts, thin
+            // plates that slide anomalously, and degenerate inertia tensors.
+            const MIN_HALF_EXTENT: f64 = 0.03;
+            let child_half_extents = (target_node.dimensions * conn.scale * 0.5)
+                .max(glam::DVec3::splat(MIN_HALF_EXTENT));
             let parent_half_extents = world.bodies[parent_body_idx].half_extents;
 
             let child_body = world.add_body(child_half_extents);
