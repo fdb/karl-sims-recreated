@@ -4,6 +4,7 @@ import {
   stopEvolution,
   pauseEvolution,
   resumeEvolution,
+  replayEvolution,
   getBestCreatures,
   getBestPerIsland,
   getEvolutionStats,
@@ -112,6 +113,15 @@ export default function EvolutionDetail({ evoId }: Props) {
     refresh();
   };
 
+  const handleReplay = async () => {
+    // Spawns a new evolution with the same config + seed. Seed is read
+    // from the source row so the initial population and mutation stream
+    // are byte-identical — useful for A/B'ing code changes against the
+    // exact same evolutionary pressure.
+    const { id: newId } = await replayEvolution(evoId);
+    navigate({ to: "/evolutions/$evoId", params: { evoId: String(newId) } });
+  };
+
   // Merge historical stats with live WS updates (dedup by generation)
   const liveForEvo = liveStats.filter((s) => s.evolution_id === evoId);
   const mergedMap = new Map<number, GenerationStats>();
@@ -183,6 +193,15 @@ export default function EvolutionDetail({ evoId }: Props) {
               className="px-4 py-1.5 text-sm bg-success/20 text-success rounded-md hover:bg-success/30 transition-colors"
             >
               Resume
+            </button>
+          )}
+          {evolution && (
+            <button
+              onClick={handleReplay}
+              title="Start a new run with the same config and seed — deterministic re-run"
+              className="px-4 py-1.5 text-sm bg-text-muted/15 text-text-secondary rounded-md hover:bg-text-muted/25 hover:text-text-primary transition-colors"
+            >
+              Replay
             </button>
           )}
         </div>

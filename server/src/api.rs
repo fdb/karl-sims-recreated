@@ -76,6 +76,10 @@ pub fn routes() -> Router<AppState> {
             axum::routing::post(resume_evolution),
         )
         .route(
+            "/api/evolutions/{id}/replay",
+            axum::routing::post(replay_evolution),
+        )
+        .route(
             "/api/evolutions/{id}/stats",
             axum::routing::get(get_evolution_stats),
         )
@@ -151,7 +155,9 @@ async fn create_evolution(
         let name = req.name.clone();
         tokio::task::spawn_blocking(move || {
             let conn = db.get().expect("pool get");
-            db::create_evolution(&conn, &config_json, name.as_deref())
+            // Pre-creation we don't know the row id, so we can't store a specific
+            // seed yet. Pass None — get_evolution_seed will fall back to the id.
+            db::create_evolution(&conn, &config_json, name.as_deref(), None)
         })
         .await
         .expect("spawn_blocking join")
@@ -308,6 +314,61 @@ async fn resume_evolution(
     .await
     .expect("spawn_blocking join");
     Json(serde_json::json!({"status": "running"}))
+}
+
+/// Spawn a new evolution with the same config + seed as an existing one.
+///
+/// Deterministic re-run: the initial population and mutation stream will be
+/// byte-identical to the source evolution — every random draw feeds from
+/// `ChaCha8Rng::seed_from_u64(source_seed)`, same as the original run.
+/// Useful for reproducing bugs, testing the effect of a code change on
+/// otherwise-identical evolutionary pressure, or saving interesting seeds.
+///
+/// The new evolution gets a name prefixed with "Replay of {source}".
+async fn replay_evolution(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    // Read source config + name + seed, then insert new row in a single
+    // connection checkout. Seed is inherited verbatim.
+    let db = state.db.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let conn = db.get().expect("pool get");
+        let full = db::get_evolution_full(&conn, id)?;
+        let (_status, _gen, config_json, src_name) = full;
+        let seed = db::get_evolution_seed(&conn, id);
+        let new_name = Some(match src_name {
+            Some(n) => format!("Replay of {n}"),
+            None => format!("Replay of #{id}"),
+        });
+        let new_id = db::create_evolution(
+            &conn,
+            &config_json,
+            new_name.as_deref(),
+            Some(seed),
+        );
+        Some((new_id, config_json))
+    })
+    .await
+    .expect("spawn_blocking join");
+    let (new_id, config_json) = match result {
+        Some(x) => x,
+        None => return Json(serde_json::json!({"error": "source evolution not found"})),
+    };
+
+    // Spawn coordinator for the replay.
+    let db_c = state.db.clone();
+    let tx = state.tx.clone();
+    tokio::spawn(async move {
+        coordinator::run_evolution(db_c, new_id, Some(tx)).await;
+    });
+
+    Json(serde_json::json!({
+        "id": new_id,
+        "source_id": id,
+        "config": serde_json::from_str::<serde_json::Value>(&config_json).unwrap_or_default(),
+        "status": "running",
+    }))
 }
 
 async fn get_evolution_stats(

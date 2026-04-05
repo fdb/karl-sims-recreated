@@ -9,14 +9,18 @@ use karl_sims_core::genotype::GenomeGraph;
 use tokio::sync::broadcast;
 
 use crate::db::{
-    create_task, get_evolution_status, get_evolution_full, get_genotype,
+    create_task, get_evolution_seed, get_evolution_status, get_evolution_full, get_genotype,
     get_generation_fitnesses, get_generation_fitnesses_by_island, insert_genotype,
     insert_genotype_with_fitness, pending_task_count, update_evolution, DbPool,
 };
 
 /// Run a full evolution loop, persisting every generation to the database.
 pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender<String>>) {
-    let mut rng = ChaCha8Rng::seed_from_u64(evo_id as u64);
+    let seed = {
+        let conn = db.get().expect("pool get");
+        get_evolution_seed(&conn, evo_id)
+    };
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     // Read params from DB.
     let params: EvolutionParams = {

@@ -95,6 +95,15 @@ pub fn init_db(path: &str) -> DbPool {
     )
     .ok();
 
+    // Migrate: add seed column so evolutions are reproducible independently
+    // of their auto-increment id. Existing rows get NULL; the coordinator
+    // falls back to `evo_id as u64` for NULL seeds, preserving prior behavior.
+    conn.execute(
+        "ALTER TABLE evolutions ADD COLUMN seed INTEGER",
+        [],
+    )
+    .ok();
+
     // Index to speed up per-island, per-generation lookups.
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_genotypes_evo_island_gen
@@ -115,13 +124,37 @@ pub fn init_db(path: &str) -> DbPool {
 }
 
 /// Insert a new evolution run, return its ID.
-pub fn create_evolution(conn: &Connection, config_json: &str, name: Option<&str>) -> i64 {
+///
+/// If `seed` is `None`, the evolution's RNG seed defaults to its row id (the
+/// original behavior). Pass `Some(seed)` when replaying from another run so the
+/// initial population + mutation stream are byte-identical to the source.
+pub fn create_evolution(
+    conn: &Connection,
+    config_json: &str,
+    name: Option<&str>,
+    seed: Option<u64>,
+) -> i64 {
     conn.execute(
-        "INSERT INTO evolutions (config_json, name) VALUES (?1, ?2)",
-        params![config_json, name],
+        "INSERT INTO evolutions (config_json, name, seed) VALUES (?1, ?2, ?3)",
+        // SQLite stores i64; cast from u64 is fine, bit pattern preserved.
+        params![config_json, name, seed.map(|s| s as i64)],
     )
     .expect("Failed to create evolution");
     conn.last_insert_rowid()
+}
+
+/// Get the seed used by this evolution's RNG. Returns the stored `seed` if
+/// present, otherwise falls back to `evo_id as u64` for backward compatibility
+/// with rows created before the seed column existed.
+pub fn get_evolution_seed(conn: &Connection, evo_id: i64) -> u64 {
+    let stored: Option<i64> = conn
+        .query_row(
+            "SELECT seed FROM evolutions WHERE id = ?1",
+            params![evo_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(None);
+    stored.map(|s| s as u64).unwrap_or(evo_id as u64)
 }
 
 /// Update the name of an evolution.
@@ -532,7 +565,8 @@ mod tests {
                 current_gen INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                name TEXT
+                name TEXT,
+                seed INTEGER
             );
             CREATE TABLE genotypes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -561,7 +595,7 @@ mod tests {
     #[test]
     fn island_fitness_query_returns_only_matching_island() {
         let conn = mem_db();
-        let evo_id = create_evolution(&conn, "{}", None);
+        let evo_id = create_evolution(&conn, "{}", None, None);
         let bytes = vec![0u8, 1, 2];
         // Insert 2 creatures in island 0 and 3 in island 1, all in gen 5.
         let a = insert_genotype_with_fitness(&conn, evo_id, 5, &bytes, 1.0, 0);

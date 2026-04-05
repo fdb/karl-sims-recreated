@@ -118,6 +118,13 @@ export async function resumeEvolution(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}/resume`, { method: "POST" });
 }
 
+export async function replayEvolution(id: number): Promise<{ id: number }> {
+  const res = await fetch(`${API_BASE}/api/evolutions/${id}/replay`, {
+    method: "POST",
+  });
+  return res.json();
+}
+
 export async function deleteEvolution(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/evolutions/${id}`, { method: "DELETE" });
 }
