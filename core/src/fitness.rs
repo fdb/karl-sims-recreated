@@ -99,20 +99,32 @@ pub fn evaluate_fitness(genome: &GenomeGraph, params: &EvolutionParams) -> Fitne
 /// Maximum plausible displacement in one simulation — anything beyond this is a physics blowup.
 const MAX_PLAUSIBLE_DISTANCE: f64 = 1000.0;
 
+/// Maximum plausible root speed, m/s. Real small creatures max out around
+/// 2–5 m/s (cockroach 1.5, mouse 4, lizard 6). We allow 8 m/s headroom for
+/// initial falls (free-fall from spawn height 2m gives ~6 m/s terminal
+/// before ground contact) but reject sustained faster-than-cheetah motion
+/// from a sub-metre creature — that's always a solver exploit riding the
+/// 20 m/s Rapier body-velocity clamp.
+const MAX_PLAUSIBLE_SPEED: f64 = 8.0;
+
 fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> FitnessResult {
     let dt = 1.0 / 60.0;
     let total_steps = (params.sim_duration / dt).round() as usize;
     let early_check_step = (2.0 / dt).round() as usize;
     let initial_pos = creature.world.transforms[creature.world.root].translation;
     let mut max_displacement: f64 = 0.0;
+    let mut prev_pos = initial_pos;
 
     for step in 0..total_steps {
         creature.step(dt);
         let pos = creature.world.transforms[creature.world.root].translation;
         let disp = (pos - initial_pos).length();
 
-        // Physics divergence check: NaN or implausible distance → zero fitness.
-        if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE {
+        // Physics divergence check: NaN, implausible distance, or speed.
+        let frame_speed = (pos - prev_pos).length() / dt;
+        if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE
+            || !frame_speed.is_finite() || frame_speed > MAX_PLAUSIBLE_SPEED
+        {
             return FitnessResult {
                 score: 0.0,
                 distance: 0.0,
@@ -120,6 +132,7 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
                 terminated_early: true,
             };
         }
+        prev_pos = pos;
 
         max_displacement = max_displacement.max(disp);
         if step + 1 == early_check_step && disp < 0.01 {
@@ -196,9 +209,13 @@ fn evaluate_following(genome: &GenomeGraph, params: &EvolutionParams) -> Fitness
             creature.step(dt);
             let pos = creature.world.transforms[creature.world.root].translation;
 
-            // Physics divergence check.
+            // Physics divergence check (position + speed).
             let disp = (pos - DVec3::ZERO).length();
-            if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE {
+            let movement = pos - prev_pos;
+            let frame_speed = movement.length() / dt;
+            if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE
+                || !frame_speed.is_finite() || frame_speed > MAX_PLAUSIBLE_SPEED
+            {
                 return FitnessResult {
                     score: 0.0,
                     distance: 0.0,
@@ -207,7 +224,6 @@ fn evaluate_following(genome: &GenomeGraph, params: &EvolutionParams) -> Fitness
                 };
             }
 
-            let movement = pos - prev_pos;
             let to_light = (creature.world.light_position - pos).normalize_or_zero();
             let speed = movement.dot(to_light) / dt;
             if speed > 0.0 {
@@ -294,15 +310,19 @@ pub fn evaluate_swimming_fitness(
 
     let mut max_displacement: f64 = 0.0;
     let mut terminated_early = false;
+    let mut prev_pos = initial_pos;
 
     for step in 0..total_steps {
         creature.step(config.dt);
 
         let current_pos = creature.world.transforms[creature.world.root].translation;
         let disp = (current_pos - initial_pos).length();
+        let frame_speed = (current_pos - prev_pos).length() / config.dt;
 
-        // Physics divergence check.
-        if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE {
+        // Physics divergence check (position + speed).
+        if !disp.is_finite() || disp > MAX_PLAUSIBLE_DISTANCE
+            || !frame_speed.is_finite() || frame_speed > MAX_PLAUSIBLE_SPEED
+        {
             return FitnessResult {
                 score: 0.0,
                 distance: 0.0,
@@ -310,6 +330,7 @@ pub fn evaluate_swimming_fitness(
                 terminated_early: true,
             };
         }
+        prev_pos = current_pos;
 
         if disp > max_displacement {
             max_displacement = disp;
