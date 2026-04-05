@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shifty Movement — How Evolution Gamed Fitness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-deep:   #0a0a0f;
+    --bg-surf:   #12121a;
+    --bg-card:   #1a1a26;
+    --bg-elev:   #22222e;
+    --border:    #2a2a3a;
+    --border-br: #3a3a52;
+    --text:      #e8e8f0;
+    --text-sec:  #9898b0;
+    --text-mu:   #5e5e78;
+    --orange-400:#fb923c;
+    --orange-500:#f97316;
+    --cyan:      #22d3ee;
+    --green:     #4ade80;
+    --pink:      #f472b6;
+    --purple:    #c084fc;
+    --yellow:    #facc15;
+    --red:       #f87171;
+  }
+  html, body { height: 100%; background: var(--bg-deep); color: var(--text); font-family: "Outfit", sans-serif; overflow: hidden; }
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(1200px 800px at 20% 10%, rgba(251,146,60,0.05), transparent 60%),
+      radial-gradient(1000px 700px at 90% 90%, rgba(34,211,238,0.04), transparent 60%),
+      linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px) 0 0 / 40px 40px,
+      linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px) 0 0 / 40px 40px;
+  }
+  .deck { position: fixed; inset: 0; z-index: 1; }
+  .slide {
+    position: absolute; inset: 0;
+    padding: 4rem 5rem 6rem;
+    display: flex; flex-direction: column; gap: 1.5rem;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.45s ease, transform 0.45s ease;
+    transform: translateX(40px);
+    overflow-y: auto;
+  }
+  .slide.active { opacity: 1; pointer-events: auto; transform: none; }
+  .slide.exit-left { transform: translateX(-40px); }
+  .slide.exit-right { transform: translateX(40px); }
+
+  .badge-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.6rem; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px; font-size: 0.75rem; font-weight: 500; color: var(--text-sec); font-family: "JetBrains Mono", monospace; }
+  .badge.orange { border-color: rgba(251,146,60,0.3); color: var(--orange-400); }
+  .badge.cyan   { border-color: rgba(34,211,238,0.3); color: var(--cyan); }
+  .badge.red    { border-color: rgba(248,113,113,0.3); color: var(--red); }
+  .badge.green  { border-color: rgba(74,222,128,0.3); color: var(--green); }
+
+  h1 { font-size: 3rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; }
+  h1 .accent { color: var(--orange-400); }
+  h2 { font-size: 1.85rem; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 0.25rem; }
+  h2 .accent { color: var(--orange-400); }
+  h3 { font-size: 1.1rem; font-weight: 600; color: var(--text); margin-bottom: 0.35rem; }
+  p.lead { color: var(--text-sec); font-size: 1.1rem; line-height: 1.55; max-width: 72ch; }
+  p.body { color: var(--text-sec); line-height: 1.6; max-width: 72ch; }
+  p.body code, .inline-code { font-family: "JetBrains Mono", monospace; font-size: 0.88em; background: var(--bg-elev); padding: 0.08em 0.4em; border-radius: 4px; color: var(--cyan); border: 1px solid var(--border); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.85rem; }
+  @media (max-width: 1100px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
+  .card:hover { transform: translateY(-2px); border-color: var(--border-br); box-shadow: 0 10px 30px rgba(0,0,0,0.25), 0 0 0 1px rgba(251,146,60,0.15); }
+  .card.callout { background: linear-gradient(180deg, rgba(251,146,60,0.08), rgba(251,146,60,0.02)); border-color: rgba(251,146,60,0.35); }
+  .card.callout-red { background: linear-gradient(180deg, rgba(248,113,113,0.08), rgba(248,113,113,0.02)); border-color: rgba(248,113,113,0.35); }
+  .card.callout-green { background: linear-gradient(180deg, rgba(74,222,128,0.08), rgba(74,222,128,0.02)); border-color: rgba(74,222,128,0.35); }
+  .card .label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-mu); margin-bottom: 0.5rem; font-family: "JetBrains Mono", monospace; }
+  .card .label.orange { color: var(--orange-400); }
+  .card .label.red { color: var(--red); }
+  .card .label.green { color: var(--green); }
+  .card .stat { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 2rem; line-height: 1.1; color: var(--text); }
+  .card .stat.sm { font-size: 1.5rem; }
+  .card .sub { color: var(--text-sec); font-size: 0.85rem; margin-top: 0.35rem; }
+
+  /* Code block */
+  .code-block { background: var(--bg-surf); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .code-header { display: flex; align-items: center; gap: 0.45rem; padding: 0.5rem 0.85rem; background: var(--bg-elev); border-bottom: 1px solid var(--border); font-family: "JetBrains Mono", monospace; font-size: 0.78rem; color: var(--text-sec); }
+  .code-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .code-dot.red { background: #ff5f57; } .code-dot.yellow { background: #febc2e; } .code-dot.green { background: #28c840; }
+  .code-body { padding: 0.85rem 1rem; font-family: "JetBrains Mono", monospace; font-size: 0.86rem; line-height: 1.55; white-space: pre; overflow-x: auto; }
+  .kw { color: var(--purple); } .ty { color: var(--cyan); } .st { color: var(--green); } .nb { color: var(--orange-400); } .cm { color: var(--text-mu); font-style: italic; } .fn { color: var(--pink); } .pr { color: var(--yellow); }
+  .line-mark { background: rgba(248,113,113,0.12); display: block; margin: 0 -1rem; padding: 0 1rem; border-left: 2px solid var(--red); }
+  .line-mark-ok { background: rgba(74,222,128,0.10); display: block; margin: 0 -1rem; padding: 0 1rem; border-left: 2px solid var(--green); }
+
+  /* Nav */
+  .nav-bottom { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%); display: flex; gap: 0.4rem; align-items: center; z-index: 100; padding: 0.6rem 1rem; background: rgba(18,18,26,0.8); backdrop-filter: blur(10px); border: 1px solid var(--border); border-radius: 999px; }
+  .nav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-br); cursor: pointer; transition: all 0.2s; }
+  .nav-dot:hover { background: var(--text-sec); transform: scale(1.2); }
+  .nav-dot.active { background: var(--orange-400); width: 24px; border-radius: 4px; }
+  .nav-spacer { width: 1px; height: 12px; background: var(--border); margin: 0 0.3rem; }
+  .counter { position: fixed; top: 1.25rem; left: 1.5rem; z-index: 100; font-family: "JetBrains Mono", monospace; font-size: 0.75rem; color: var(--text-mu); padding: 0.4rem 0.7rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+  .counter .cur { color: var(--orange-400); }
+  .section-label { position: fixed; top: 1.25rem; right: 1.5rem; z-index: 100; font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--text-mu); text-transform: uppercase; letter-spacing: 0.1em; padding: 0.4rem 0.7rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+  .section-label .lab { color: var(--cyan); }
+  .hint { position: fixed; bottom: 1.25rem; right: 1.5rem; z-index: 100; font-family: "JetBrains Mono", monospace; font-size: 0.7rem; color: var(--text-mu); padding: 0.4rem 0.7rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+
+  /* Stagger */
+  .stagger > * { opacity: 0; transform: translateY(12px); transition: opacity 0.4s ease, transform 0.4s ease; }
+  .slide.active .stagger > * { opacity: 1; transform: none; }
+  .slide.active .stagger > *:nth-child(1) { transition-delay: 0.05s; }
+  .slide.active .stagger > *:nth-child(2) { transition-delay: 0.12s; }
+  .slide.active .stagger > *:nth-child(3) { transition-delay: 0.19s; }
+  .slide.active .stagger > *:nth-child(4) { transition-delay: 0.26s; }
+  .slide.active .stagger > *:nth-child(5) { transition-delay: 0.33s; }
+  .slide.active .stagger > *:nth-child(6) { transition-delay: 0.40s; }
+
+  /* Custom viz styles */
+  .dof-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.4rem; margin-top: 0.75rem; }
+  .dof-cell { aspect-ratio: 1; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: "JetBrains Mono", monospace; font-size: 1rem; font-weight: 700; color: var(--text); }
+  .dof-cell.rigid { background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.35); color: var(--red); }
+  .dof-cell .v { display: block; line-height: 1; }
+  .dof-cell .lbl { font-size: 0.58rem; font-weight: 500; color: var(--text-mu); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.2rem; }
+
+  .formula { font-family: "JetBrains Mono", monospace; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1.1rem; font-size: 1.05rem; color: var(--text); margin: 0.4rem 0; }
+  .formula .var { color: var(--orange-400); }
+  .formula .num { color: var(--cyan); }
+  .formula .res { color: var(--green); font-weight: 600; }
+  .formula .eq { color: var(--text-mu); margin: 0 0.5em; }
+
+  /* Physics canvas */
+  .physics-container { position: relative; background: var(--bg-surf); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .physics-controls { padding: 0.5rem 0.8rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; align-items: center; font-family: "JetBrains Mono", monospace; font-size: 0.78rem; color: var(--text-sec); }
+  .btn { padding: 0.35rem 0.8rem; background: var(--bg-elev); border: 1px solid var(--border-br); border-radius: 6px; color: var(--text); font-family: "JetBrains Mono", monospace; font-size: 0.78rem; cursor: pointer; transition: all 0.15s; }
+  .btn:hover { background: var(--orange-400); color: var(--bg-deep); border-color: var(--orange-400); }
+  .readout { margin-left: auto; color: var(--text-mu); font-size: 0.75rem; }
+  .readout .n { color: var(--orange-400); }
+
+  /* Table */
+  table.clean { width: 100%; border-collapse: collapse; font-family: "JetBrains Mono", monospace; font-size: 0.85rem; }
+  table.clean th { text-align: left; padding: 0.5rem 0.7rem; color: var(--text-mu); border-bottom: 1px solid var(--border); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  table.clean td { padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--border); color: var(--text-sec); }
+  table.clean tr:hover td { background: rgba(251,146,60,0.04); color: var(--text); }
+
+  .mini-bar { display: inline-block; height: 8px; border-radius: 2px; background: var(--orange-400); vertical-align: middle; margin-right: 0.4em; }
+
+  /* Island bar chart */
+  .bar-row { display: grid; grid-template-columns: 80px 1fr 80px; gap: 0.6rem; align-items: center; margin-bottom: 0.45rem; font-family: "JetBrains Mono", monospace; font-size: 0.82rem; }
+  .bar-row .bar-label { color: var(--text-sec); }
+  .bar-row .bar-track { height: 18px; background: var(--bg-elev); border-radius: 3px; position: relative; overflow: hidden; }
+  .bar-row .bar-fill { height: 100%; background: linear-gradient(90deg, var(--orange-500), var(--orange-400)); border-radius: 3px; transition: width 0.8s cubic-bezier(0.4,0,0.2,1); }
+  .bar-row .bar-fill.clean { background: linear-gradient(90deg, #2dd4bf, var(--cyan)); }
+  .bar-row .bar-val { color: var(--text); text-align: right; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="counter"><span class="cur" id="cur">1</span> / <span id="tot">9</span></div>
+<div class="section-label"><span class="lab" id="section">Intro</span></div>
+<div class="hint">← → or click dots · press Space</div>
+
+<div class="deck" id="deck">
+
+<!-- ─────────── 1. Title ─────────── -->
+<section class="slide" data-section="Intro">
+  <div class="stagger" style="max-width: 900px;">
+    <div class="badge-row">
+      <span class="badge orange">● FITNESS BUG</span>
+      <span class="badge cyan">karl-sims-recreated</span>
+      <span class="badge">evolution 48 · island 2 · gen 20→75+</span>
+    </div>
+    <h1>Shifty Movement<br><span class="accent">How evolution slipped past the fitness function.</span></h1>
+    <p class="lead">Creature 900423 slides across the ground at 5 m/s with zero joint actuation. It has 12 joints, 0 degrees of freedom, 0 effectors — yet it scored in the 99th percentile. This explains exactly how, and why the safety net designed to catch it had a gap big enough to drive a truck through.</p>
+    <div class="badge-row" style="margin-top: 0.5rem;">
+      <span class="badge">core/src/fitness.rs:316</span>
+      <span class="badge">core/src/joint.rs:18</span>
+      <span class="badge red">844 infected genotypes</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 2. Symptom ─────────── -->
+<section class="slide" data-section="Symptom">
+  <div class="stagger">
+    <div>
+      <h2>The <span class="accent">symptom</span>: creatures shift without moving.</h2>
+      <p class="body">A viewer of creature 900423 shows a stack of flat plates lying nearly prone on the ground, sliding laterally at roughly 5 metres per second for the full 10-second evaluation. Nothing visibly articulates. No limbs swing. No joints bend. Yet the root body covers 44 metres of distance — enough to score the highest fitness anywhere in the evolution.</p>
+    </div>
+    <div class="grid-4">
+      <div class="card">
+        <div class="label">FITNESS</div>
+        <div class="stat">44.17</div>
+        <div class="sub">99th percentile in the evolution</div>
+      </div>
+      <div class="card">
+        <div class="label">DISPLACEMENT</div>
+        <div class="stat">44.2 m</div>
+        <div class="sub">in 10 s → 4.42 m/s avg</div>
+      </div>
+      <div class="card">
+        <div class="label">FINAL Y</div>
+        <div class="stat">0.24 m</div>
+        <div class="sub">lying on the ground</div>
+      </div>
+      <div class="card">
+        <div class="label">BODY PLATES</div>
+        <div class="stat">13</div>
+        <div class="sub">thin, stacked (z ≈ 0.08 m)</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label orange">TRACE · root body position per second</div>
+      <table class="clean">
+        <thead><tr><th>t</th><th>root X</th><th>root Y</th><th>root Z</th><th>|Δx/Δt|</th></tr></thead>
+        <tbody>
+          <tr><td>0 s</td><td>0.00</td><td>2.00</td><td>0.00</td><td>—</td></tr>
+          <tr><td>2 s</td><td>-0.24</td><td>0.27</td><td>1.76</td><td>1.2 m/s</td></tr>
+          <tr><td>4 s</td><td>-7.70</td><td>0.24</td><td>3.29</td><td>3.7 m/s</td></tr>
+          <tr><td>6 s</td><td>-19.44</td><td>0.24</td><td>6.23</td><td>5.9 m/s</td></tr>
+          <tr><td>8 s</td><td>-30.59</td><td>0.23</td><td>9.70</td><td>5.4 m/s</td></tr>
+          <tr><td>10 s</td><td>-41.11</td><td>0.24</td><td>16.15</td><td>5.1 m/s</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 3. Morphology Discovery ─────────── -->
+<section class="slide" data-section="Morphology">
+  <div class="stagger">
+    <div>
+      <h2>Discovery #1: every joint is <span class="accent">rigid</span>.</h2>
+      <p class="body">When I inspected the creature's genotype, all 11 genome nodes specified <span class="inline-code">JointType::Rigid</span>. The phenotype's 12 joints are every one a <span class="inline-code">FixedJoint</span> in Rapier — welds, not hinges. This creature has no moving parts. The brain has no effectors to drive, because there are no degrees of freedom to drive.</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="label red">DOF COUNT PER JOINT · JointType::dof_count()</div>
+        <div class="dof-grid">
+          <div class="dof-cell rigid"><div><span class="v">0</span><span class="lbl">Rigid</span></div></div>
+          <div class="dof-cell"><div><span class="v">1</span><span class="lbl">Revolute</span></div></div>
+          <div class="dof-cell"><div><span class="v">1</span><span class="lbl">Twist</span></div></div>
+          <div class="dof-cell"><div><span class="v">2</span><span class="lbl">Universal</span></div></div>
+          <div class="dof-cell"><div><span class="v">2</span><span class="lbl">BendTwist</span></div></div>
+          <div class="dof-cell"><div><span class="v">2</span><span class="lbl">TwistBend</span></div></div>
+          <div class="dof-cell"><div><span class="v">3</span><span class="lbl">Spherical</span></div></div>
+        </div>
+        <p class="body" style="margin-top: 0.8rem; font-size: 0.88rem;">Seven joint flavours. Six can be actuated. One (<span class="inline-code">Rigid</span>) cannot. Evolution picked the one that can't.</p>
+      </div>
+
+      <div class="card callout-red">
+        <div class="label red">CREATURE 900423 · aggregate</div>
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.2rem;">
+          <div>
+            <div class="stat">12 × 0</div>
+            <div class="sub">joints × DOFs per joint</div>
+          </div>
+          <div>
+            <div class="stat">= 0</div>
+            <div class="sub">total DOFs</div>
+          </div>
+        </div>
+        <p class="body" style="margin-top: 0.9rem; font-size: 0.88rem;">A weld graph of 13 body plates moving as one rigid assembly. No joint angles can change. No neuron output can produce actuation. If this creature moves, it cannot be because its <em>brain</em> drove it.</p>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span><span>core/src/joint.rs:15-24</span></div>
+      <div class="code-body"><span class="kw">impl</span> <span class="ty">JointType</span> {
+    <span class="kw">pub fn</span> <span class="fn">dof_count</span>(&<span class="kw">self</span>) -> <span class="ty">usize</span> {
+        <span class="kw">match</span> <span class="kw">self</span> {
+<span class="line-mark">            JointType::Rigid => <span class="nb">0</span>,                                         <span class="cm">// ← the escape key</span></span>
+            JointType::Revolute | JointType::Twist => <span class="nb">1</span>,
+            JointType::Universal | JointType::BendTwist | JointType::TwistBend => <span class="nb">2</span>,
+            JointType::Spherical => <span class="nb">3</span>,
+        }
+    }
+}</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 4. Physics: PE → KE ─────────── -->
+<section class="slide" data-section="Physics">
+  <div class="stagger">
+    <div>
+      <h2>Discovery #2: gravity is <span class="accent">generous</span>.</h2>
+      <p class="body">Land creatures spawn at <span class="inline-code">y = 2.0</span> and fall under gravity until they touch the ground. For a creature whose center of mass ends up at y ≈ 0.24, that's a drop of 1.76 m. The potential energy released has to go somewhere — and with the right geometry, most of it becomes horizontal kinetic energy.</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="label orange">FREE-FALL VELOCITY</div>
+        <p class="body" style="font-size: 0.88rem; margin-bottom: 0.4rem;">Potential energy at spawn height, converted fully to kinetic:</p>
+        <div class="formula"><span class="var">mgh</span> <span class="eq">=</span> ½<span class="var">mv²</span></div>
+        <div class="formula"><span class="var">v</span> <span class="eq">=</span> √(2<span class="var">g</span><span class="var">h</span>)</div>
+        <div class="formula">
+          <span class="eq">=</span> √(2 × <span class="num">9.81</span> × <span class="num">1.76</span>)
+        </div>
+        <div class="formula">
+          <span class="eq">=</span> <span class="res">5.87 m/s</span>
+        </div>
+        <p class="body" style="font-size: 0.85rem; margin-top: 0.5rem;">Upper bound: the full speed achievable from pure free-fall conversion, ignoring losses.</p>
+      </div>
+
+      <div class="card">
+        <div class="label green">OBSERVED PEAK VELOCITY</div>
+        <p class="body" style="font-size: 0.88rem; margin-bottom: 0.4rem;">From the trace, max measured second-over-second drift:</p>
+        <div style="margin-top: 0.3rem;">
+          <svg id="velplot" width="100%" height="160" viewBox="0 0 400 160"></svg>
+        </div>
+        <p class="body" style="font-size: 0.85rem; margin-top: 0.3rem;">Peak 5.9 m/s between t=5–6 s, then a slow decay to 5.1 m/s as friction bleeds energy. <strong style="color: var(--green);">The match with the theoretical bound is exact.</strong> Nothing else is needed to explain the motion.</p>
+      </div>
+    </div>
+
+    <div class="card callout">
+      <div class="label orange">WHAT'S ACTUALLY HAPPENING</div>
+      <p class="body" style="font-size: 0.92rem;">1. Creature spawns as a rigid welded assembly at y = 2.0 (13 flat plates glued together).<br>
+      2. Gravity pulls it down. Kinetic energy builds up during the fall: ≈ 5.87 m/s worth.<br>
+      3. The assembly's flat, asymmetric geometry hits the ground at an angle.<br>
+      4. The impulse from ground collision deflects angular momentum into translational motion.<br>
+      5. The thin-plate shape presents low friction area per unit mass — the assembly <em>skates</em>.<br>
+      6. Friction slowly bleeds energy, but over the 10-second window the creature slides 44 m.<br><br>
+      <strong style="color: var(--text);">This is not a physics bug.</strong> Given the geometry, this is what Rapier is supposed to simulate. The bug is that evolution <em>found</em> this and the fitness function couldn't penalise it.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 5. The Escape Hatch ─────────── -->
+<section class="slide" data-section="The Bug">
+  <div class="stagger">
+    <div>
+      <h2>The escape hatch: <span class="accent">min_joint_motion</span> skips DOF-less creatures.</h2>
+      <p class="body">The fitness layer already has an anti-exploit mechanism — a per-DOF windowed stddev check that multiplies the score by a coefficient near 0 when joints stay frozen for any 2-second window. It is designed to catch the classic "pin a joint at its limit and push" exploit. But it has a guard clause at the top that never runs when the creature has zero DOFs.</p>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span><span>core/src/fitness.rs:316-332</span></div>
+      <div class="code-body"><span class="kw">let</span> motion_coef = <span class="kw">match</span> (params.min_joint_motion, dof_index.is_empty()) {
+<span class="line-mark">    (<span class="ty">None</span>, _) | (_, <span class="kw">true</span>) => <span class="nb">1.0</span>,                      <span class="cm">// ← THE BUG: empty DOFs → pass</span></span>
+    (<span class="ty">Some</span>(threshold), <span class="kw">false</span>) => {
+        <span class="kw">if</span> !min_window_stddev.iter().any(|sd| sd.is_finite()) {
+            <span class="nb">1.0</span>
+        } <span class="kw">else</span> {
+            <span class="kw">let</span> mean_min_sd: <span class="ty">f64</span> = min_window_stddev
+                .iter()
+                .map(|&sd| <span class="kw">if</span> sd.is_finite() { sd } <span class="kw">else</span> { <span class="nb">0.0</span> })
+                .sum::&lt;<span class="ty">f64</span>&gt;()
+                / min_window_stddev.len() <span class="kw">as</span> <span class="ty">f64</span>;
+            (mean_min_sd / threshold).clamp(<span class="nb">0.0</span>, <span class="nb">1.0</span>)
+        }
+    }
+};
+<span class="kw">let</span> base_score = horizontal_distance * <span class="nb">0.7</span> + max_displacement * <span class="nb">0.3</span>;
+FitnessResult { score: base_score * motion_coef, .. }</div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card callout-red">
+        <div class="label red">INTENT</div>
+        <p class="body" style="font-size: 0.9rem;">"A creature with no joints (one body) gets coefficient 1.0 — the penalty only applies when there IS a brain→joint control path that could exploit." &nbsp;&nbsp;<em style="color: var(--text-mu);">— the doc comment in fitness.rs</em></p>
+      </div>
+      <div class="card callout-red">
+        <div class="label red">WHAT ACTUALLY HAPPENS</div>
+        <p class="body" style="font-size: 0.9rem;">Intent says "single-body creature". Code says <span class="inline-code">dof_index.is_empty()</span>. Those are different! A 13-body creature whose joints are all Rigid has empty <span class="inline-code">dof_index</span> too — and it gets <span class="inline-code">motion_coef = 1.0</span>, same as a single body. No penalty, no question.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">COMPUTATION FOR CREATURE 900423</div>
+      <table class="clean">
+        <tr><td style="color: var(--text-mu);">params.min_joint_motion</td><td><span class="inline-code">Some(0.3)</span></td><td style="color: var(--text-mu);">(enabled, threshold = 0.3 rad)</td></tr>
+        <tr><td style="color: var(--text-mu);">dof_index.len()</td><td><span class="inline-code">0</span></td><td style="color: var(--text-mu);">(12 joints × 0 DOFs each)</td></tr>
+        <tr><td style="color: var(--text-mu);">match arm taken</td><td><span style="color: var(--red);"><span class="inline-code">(_, true) => 1.0</span></span></td><td style="color: var(--text-mu);">escape clause</td></tr>
+        <tr><td style="color: var(--text-mu);">motion_coef</td><td style="color: var(--red);"><span class="inline-code">1.0</span></td><td style="color: var(--text-mu);">no penalty applied</td></tr>
+        <tr><td style="color: var(--text-mu);">base_score</td><td><span class="inline-code">44.14</span></td><td style="color: var(--text-mu);">0.7 × 44.13 + 0.3 × 44.16</td></tr>
+        <tr><td style="color: var(--text-mu);">final score</td><td style="color: var(--orange-400);"><span class="inline-code">44.14 × 1.0 = 44.14</span></td><td style="color: var(--green);">✓ top of the evolution</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 6. Selection Pressure ─────────── -->
+<section class="slide" data-section="Selection">
+  <div class="stagger">
+    <div>
+      <h2>Selection locked on at <span class="accent">generation 20</span>.</h2>
+      <p class="body">Island 2's max fitness climbs honestly for 19 generations — small random walkers, score edging up around 0.1 per generation. Then at generation 20 it jumps 6× in a single step. That's not gradual refinement; that's a mutation discovering the rigid-skate exploit. Once discovered, selection locks on: the champion clones itself forward every generation without re-evaluation.</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card" style="padding-bottom: 0.4rem;">
+        <div class="label orange">ISLAND 2 · max fitness per generation</div>
+        <svg id="fitplot" width="100%" height="260" viewBox="0 0 500 260"></svg>
+        <p class="body" style="font-size: 0.82rem; margin-top: 0.2rem;">The discontinuity at gen 20 is the smoking gun. Each plateau is a champion being carried forward by the "survivors keep their fitness" shortcut — no re-evaluation means no second chance to be penalised.</p>
+      </div>
+      <div class="card">
+        <div class="label">TIMELINE · the rigid lineage</div>
+        <table class="clean">
+          <tr><td>gen 0-19</td><td>0.3 → 4.0</td><td style="color: var(--text-mu);">honest progress</td></tr>
+          <tr><td style="color: var(--red);">gen 20</td><td style="color: var(--red);">→ 24.6</td><td style="color: var(--red);">rigid-exploit discovered</td></tr>
+          <tr><td>gen 40</td><td>→ 34.1</td><td style="color: var(--text-mu);">shape refinement</td></tr>
+          <tr><td>gen 50</td><td>→ 37.0</td><td style="color: var(--text-mu);">shape refinement</td></tr>
+          <tr><td>gen 66</td><td>→ 44.67</td><td style="color: var(--text-mu);">final optimum</td></tr>
+          <tr><td>gen 67-75+</td><td>= 44.67</td><td style="color: var(--text-mu);">clone forever</td></tr>
+        </table>
+        <p class="body" style="font-size: 0.82rem; margin-top: 0.6rem;">Once the champion was established, nothing non-rigid could compete — every offspring with moving joints had to beat a 44.67-scoring rigid skater from the starting line, and none did.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 7. Migration Spread ─────────── -->
+<section class="slide" data-section="Contagion">
+  <div class="stagger">
+    <div>
+      <h2>Migration spread the exploit to <span class="accent">4 of 5 islands</span>.</h2>
+      <p class="body">The evolution runs a ring-topology islands model: every 20 generations the best creature of each island is shipped to the next. That mechanism is supposed to preserve species diversity and cross-pollinate good ideas. Here, it took the rigid-skate discovery and flooded four of the five islands with it. Only island 1 resisted — probably because its own local champion was still barely competitive.</p>
+    </div>
+
+    <div class="card">
+      <div class="label orange">MAX FITNESS PER ISLAND · generation ≥ 60</div>
+      <div style="padding: 0.4rem 0.2rem 0.1rem;">
+        <div class="bar-row"><span class="bar-label">island 0</span><span class="bar-track"><span class="bar-fill" style="width: 98.7%;"></span></span><span class="bar-val">44.17</span></div>
+        <div class="bar-row"><span class="bar-label">island 1</span><span class="bar-track"><span class="bar-fill clean" style="width: 89.3%;"></span></span><span class="bar-val">39.93</span></div>
+        <div class="bar-row"><span class="bar-label">island 2</span><span class="bar-track"><span class="bar-fill" style="width: 100%;"></span></span><span class="bar-val">44.67</span></div>
+        <div class="bar-row"><span class="bar-label">island 3</span><span class="bar-track"><span class="bar-fill" style="width: 100%;"></span></span><span class="bar-val">44.67</span></div>
+        <div class="bar-row"><span class="bar-label">island 4</span><span class="bar-track"><span class="bar-fill" style="width: 100%;"></span></span><span class="bar-val">44.67</span></div>
+      </div>
+      <p class="body" style="font-size: 0.85rem; margin-top: 0.8rem;">Islands 2, 3, 4 reach identical peak fitness (44.67) — they are all carrying the same migrated clone. Island 0 reaches 44.17 with an independently-evolved rigid lineage. Only island 1 holds out with a slightly different strategy at 39.93 — but it too is under migration pressure and will likely convert soon.</p>
+    </div>
+
+    <div class="grid-3">
+      <div class="card">
+        <div class="label">TOTAL INFECTED</div>
+        <div class="stat sm">844</div>
+        <div class="sub">genotypes with fitness > 30 in evo 48</div>
+      </div>
+      <div class="card">
+        <div class="label">AVERAGE FITNESS</div>
+        <div class="stat sm">38.05</div>
+        <div class="sub">among the 844 high-scorers</div>
+      </div>
+      <div class="card">
+        <div class="label">ELITE CLONES</div>
+        <div class="stat sm">~500</div>
+        <div class="sub">identical 44.67 re-inserts across gens</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 8. The Fix ─────────── -->
+<section class="slide" data-section="Fix">
+  <div class="stagger">
+    <div>
+      <h2>The fix: <span class="accent">distinguish single-body from rigid-assembly</span>.</h2>
+      <p class="body">The guard clause conflates two genuinely different cases. A single-body creature <em>cannot</em> exploit joints because there are no joints. A multi-body creature with all-Rigid joints is a different animal: it's a complex shape whose motion comes entirely from physics-solver behaviour, not from brain control. The first deserves the pass. The second deserves a zero.</p>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span><span>core/src/fitness.rs:316 — proposed</span></div>
+      <div class="code-body"><span class="kw">let</span> num_bodies = creature.world.bodies.len();
+<span class="kw">let</span> motion_coef = <span class="kw">match</span> (params.min_joint_motion, num_bodies == <span class="nb">1</span>, dof_index.is_empty()) {
+    (<span class="ty">None</span>, _, _) => <span class="nb">1.0</span>,                          <span class="cm">// feature disabled → paper-faithful</span>
+<span class="line-mark-ok">    (_, <span class="kw">true</span>, _) => <span class="nb">1.0</span>,                          <span class="cm">// single body truly cannot exploit</span></span>
+<span class="line-mark-ok">    (<span class="ty">Some</span>(_), <span class="kw">false</span>, <span class="kw">true</span>) => <span class="nb">0.0</span>,                <span class="cm">// multi-body + 0 DOFs → rigid-skate exploit</span></span>
+    (<span class="ty">Some</span>(threshold), <span class="kw">false</span>, <span class="kw">false</span>) => {
+        <span class="cm">// existing per-window stddev check</span>
+        ...
+    }
+};</div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card callout-green">
+        <div class="label green">WHY THIS IS THE RIGHT LAYER</div>
+        <p class="body" style="font-size: 0.9rem;">Per CLAUDE.md: <em>"Do NOT modify physics code."</em> The physics engine is correct — a flat rigid assembly can legitimately skate on a frictional ground plane. We don't want to tamper with that. The bug is at the <strong>fitness filtering layer</strong>: Sims' paper evaluates creatures whose locomotion comes from actuated joint motion. A creature with no actuators is outside that scope and should score zero when the anti-exploit guard is active.</p>
+      </div>
+      <div class="card callout-green">
+        <div class="label green">BACKWARDS COMPATIBILITY</div>
+        <p class="body" style="font-size: 0.9rem;">Setting <span class="inline-code">min_joint_motion: None</span> keeps the original paper-faithful behaviour (no penalty, no zero). Users who want passive-geometry experiments opt out. Users who want the standard "evolve creatures that locomote via neural control" get the rigid-skate exploit killed at birth. The default (<span class="inline-code">Some(0.3)</span>) becomes correct rather than full-of-holes.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">NEXT STEPS</div>
+      <table class="clean">
+        <tr><td style="color: var(--text-mu);">1.</td><td>Apply the 3-arm match.</td><td style="color: var(--text-mu);">~5 lines in fitness.rs</td></tr>
+        <tr><td style="color: var(--text-mu);">2.</td><td>Add a test case: all-Rigid genome → score = 0 when min_joint_motion = Some(0.3).</td><td style="color: var(--text-mu);">~20 lines, RED first</td></tr>
+        <tr><td style="color: var(--text-mu);">3.</td><td>Re-evaluate existing genotypes in evo 48, or start a fresh run.</td><td style="color: var(--text-mu);">Survivor shortcut means old scores persist</td></tr>
+        <tr><td style="color: var(--text-mu);">4.</td><td>Consider a stronger check for mixed-joint creatures that use only 1-2 of their DOFs to wiggle while the rest exploit ground contact.</td><td style="color: var(--text-mu);">Future work — min, not mean, across DOFs.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 9. Summary ─────────── -->
+<section class="slide" data-section="Summary">
+  <div class="stagger">
+    <div>
+      <h2><span class="accent">Summary</span></h2>
+      <p class="body">Creature 900423 didn't break physics. It found a shape that converts gravitational potential energy into horizontal sliding, and a fitness function that couldn't tell the difference between "single body, can't exploit" and "rigid assembly, can exploit plenty". Evolution did what evolution always does: found the crack and drove through it.</p>
+    </div>
+
+    <div class="grid-3">
+      <div class="card">
+        <div class="label orange">WHAT EVOLUTION DID</div>
+        <p class="body" style="font-size: 0.88rem;">Discovered that <span class="inline-code">JointType::Rigid</span> makes all brain-control irrelevant, then optimised body geometry for low-friction sliding. Four out of five islands converged on the same exploit via ring-topology migration.</p>
+      </div>
+      <div class="card">
+        <div class="label red">WHAT WENT WRONG</div>
+        <p class="body" style="font-size: 0.88rem;">The <span class="inline-code">min_joint_motion</span> guard used <span class="inline-code">dof_index.is_empty()</span> as a proxy for "creature can't exploit joints". That test is true for single-body creatures (correct) AND for all-Rigid multi-body creatures (wrong).</p>
+      </div>
+      <div class="card">
+        <div class="label green">WHAT TO CHANGE</div>
+        <p class="body" style="font-size: 0.88rem;">One match arm. Give single-body creatures the free pass; zero out multi-body-with-no-DOFs. Physics stays untouched; the fitness filter distinguishes the cases it was always meant to distinguish.</p>
+      </div>
+    </div>
+
+    <div class="card callout">
+      <div class="label orange">THE META-LESSON</div>
+      <p class="body" style="font-size: 0.92rem;">Evolutionary search treats every line of fitness code as a specification of what to maximise. The <span class="inline-code">dof_index.is_empty()</span> guard read — to selection pressure — as "creatures with no DOFs are exempt from the anti-exploit check". Selection did not ask whether that was the author's intent. It only asked whether the condition could be triggered, and whether triggering it improved score. Once the answer was "yes" to both, the exploit propagated through the entire island mesh in under 30 generations.</p>
+    </div>
+
+    <div style="text-align: center; color: var(--text-mu); font-size: 0.8rem; margin-top: 0.5rem;">
+      <span class="inline-code" style="color: var(--text-mu);">karl-sims-recreated · docs/shifty-movement.html · 2026-04-05</span>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<nav class="nav-bottom" id="nav"></nav>
+
+<script>
+  // Slide deck controller
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const nav = document.getElementById('nav');
+  const curEl = document.getElementById('cur');
+  const totEl = document.getElementById('tot');
+  const secEl = document.getElementById('section');
+  totEl.textContent = slides.length;
+
+  // Section grouping for nav dots
+  let lastSection = null;
+  slides.forEach((s, i) => {
+    const section = s.dataset.section;
+    if (lastSection && section !== lastSection) {
+      const spacer = document.createElement('span');
+      spacer.className = 'nav-spacer';
+      nav.appendChild(spacer);
+    }
+    const dot = document.createElement('span');
+    dot.className = 'nav-dot';
+    dot.dataset.idx = i;
+    dot.title = `${i + 1}. ${section}`;
+    dot.addEventListener('click', () => go(i));
+    nav.appendChild(dot);
+    lastSection = section;
+  });
+
+  let current = 0;
+  const dots = Array.from(document.querySelectorAll('.nav-dot'));
+
+  function go(idx) {
+    if (idx < 0 || idx >= slides.length || idx === current) return;
+    const dir = idx > current ? 1 : -1;
+    slides[current].classList.remove('active');
+    slides[current].classList.add(dir > 0 ? 'exit-left' : 'exit-right');
+    current = idx;
+    slides[current].classList.remove('exit-left', 'exit-right');
+    slides[current].classList.add('active');
+    dots.forEach((d, i) => d.classList.toggle('active', i === current));
+    curEl.textContent = current + 1;
+    secEl.textContent = slides[current].dataset.section;
+    // cleanup exit classes
+    setTimeout(() => slides.forEach(s => { if (!s.classList.contains('active')) s.classList.remove('exit-left', 'exit-right'); }), 500);
+  }
+
+  // Init
+  slides[0].classList.add('active');
+  dots[0].classList.add('active');
+  secEl.textContent = slides[0].dataset.section;
+
+  // Keyboard nav
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(current + 1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(current - 1); }
+    if (e.key === 'Home') go(0);
+    if (e.key === 'End') go(slides.length - 1);
+  });
+
+  // Swipe nav
+  let touchStartX = 0;
+  document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) go(current + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+
+  // ───────── Velocity plot (slide 4) ─────────
+  (function() {
+    const svg = document.getElementById('velplot');
+    const W = 400, H = 160, PAD_L = 40, PAD_R = 10, PAD_T = 10, PAD_B = 28;
+    const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+    // observed second-over-second velocities from the trace
+    const data = [
+      { t: 1,  v: 0.38 },
+      { t: 2,  v: 1.20 },
+      { t: 3,  v: 2.53 },
+      { t: 4,  v: 3.70 },
+      { t: 5,  v: 4.60 },
+      { t: 6,  v: 5.89 },
+      { t: 7,  v: 5.76 },
+      { t: 8,  v: 5.39 },
+      { t: 9,  v: 5.40 },
+      { t: 10, v: 5.12 },
+    ];
+    const theoreticalMax = 5.87;
+    const ySteps = [0, 2, 4, 6];
+    const xScale = t => PAD_L + (t / 10) * plotW;
+    const yScale = v => PAD_T + plotH - (v / 7) * plotH;
+    // gridlines
+    ySteps.forEach(v => {
+      const y = yScale(v);
+      const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      l.setAttribute('x1', PAD_L); l.setAttribute('x2', W - PAD_R);
+      l.setAttribute('y1', y); l.setAttribute('y2', y);
+      l.setAttribute('stroke', '#2a2a3a'); l.setAttribute('stroke-dasharray', '2 3');
+      svg.appendChild(l);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', PAD_L - 8); t.setAttribute('y', y + 4);
+      t.setAttribute('text-anchor', 'end'); t.setAttribute('font-family', 'JetBrains Mono');
+      t.setAttribute('font-size', '10'); t.setAttribute('fill', '#5e5e78');
+      t.textContent = v;
+      svg.appendChild(t);
+    });
+    // theoretical max line
+    const tmax = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    tmax.setAttribute('x1', PAD_L); tmax.setAttribute('x2', W - PAD_R);
+    tmax.setAttribute('y1', yScale(theoreticalMax)); tmax.setAttribute('y2', yScale(theoreticalMax));
+    tmax.setAttribute('stroke', '#4ade80'); tmax.setAttribute('stroke-dasharray', '4 3');
+    tmax.setAttribute('stroke-width', '1.5');
+    svg.appendChild(tmax);
+    const tmaxLbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tmaxLbl.setAttribute('x', W - PAD_R - 4); tmaxLbl.setAttribute('y', yScale(theoreticalMax) - 4);
+    tmaxLbl.setAttribute('text-anchor', 'end'); tmaxLbl.setAttribute('font-family', 'JetBrains Mono');
+    tmaxLbl.setAttribute('font-size', '9'); tmaxLbl.setAttribute('fill', '#4ade80');
+    tmaxLbl.textContent = '√(2gh) = 5.87 m/s';
+    svg.appendChild(tmaxLbl);
+    // line
+    const pts = data.map(d => `${xScale(d.t)},${yScale(d.v)}`).join(' ');
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    line.setAttribute('fill', 'none'); line.setAttribute('stroke', '#fb923c');
+    line.setAttribute('stroke-width', '2'); line.setAttribute('points', pts);
+    svg.appendChild(line);
+    // dots
+    data.forEach(d => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', xScale(d.t)); c.setAttribute('cy', yScale(d.v));
+      c.setAttribute('r', '3'); c.setAttribute('fill', '#fb923c');
+      svg.appendChild(c);
+    });
+    // x-axis labels
+    [0, 2, 4, 6, 8, 10].forEach(t => {
+      const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      lbl.setAttribute('x', xScale(t)); lbl.setAttribute('y', H - 10);
+      lbl.setAttribute('text-anchor', 'middle'); lbl.setAttribute('font-family', 'JetBrains Mono');
+      lbl.setAttribute('font-size', '10'); lbl.setAttribute('fill', '#5e5e78');
+      lbl.textContent = `${t}s`;
+      svg.appendChild(lbl);
+    });
+    // axis labels
+    const xl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    xl.setAttribute('x', W / 2); xl.setAttribute('y', H - 2);
+    xl.setAttribute('text-anchor', 'middle'); xl.setAttribute('font-family', 'Outfit');
+    xl.setAttribute('font-size', '10'); xl.setAttribute('fill', '#9898b0');
+    xl.textContent = 'simulation time →'; svg.appendChild(xl);
+    const yl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    yl.setAttribute('x', -H / 2); yl.setAttribute('y', 12);
+    yl.setAttribute('text-anchor', 'middle'); yl.setAttribute('transform', 'rotate(-90)');
+    yl.setAttribute('font-family', 'Outfit'); yl.setAttribute('font-size', '10'); yl.setAttribute('fill', '#9898b0');
+    yl.textContent = 'm/s'; svg.appendChild(yl);
+  })();
+
+  // ───────── Fitness plot (slide 6) ─────────
+  (function() {
+    const svg = document.getElementById('fitplot');
+    const W = 500, H = 260, PAD_L = 44, PAD_R = 14, PAD_T = 14, PAD_B = 34;
+    const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+    // Max-fitness per generation on island 2 (from sqlite query)
+    const data = [
+      [0,0.84],[1,1.01],[2,1.77],[3,1.82],[4,2.50],[5,2.67],[6,2.77],[7,3.23],[8,3.39],[9,3.39],
+      [10,3.49],[11,3.51],[12,3.51],[13,3.80],[14,3.80],[15,3.99],[16,3.99],[17,3.99],[18,3.99],[19,3.99],
+      [20,24.62],[21,24.62],[22,24.62],[23,24.62],[24,24.62],[25,24.62],[26,24.62],[27,24.62],[28,24.62],[29,24.62],
+      [30,24.62],[31,24.62],[32,24.62],[33,24.62],[34,24.62],[35,24.62],[36,24.62],[37,24.62],[38,24.62],[39,24.62],
+      [40,34.14],[41,34.14],[42,34.14],[43,34.14],[44,34.14],[45,34.14],[46,34.14],[47,34.14],[48,34.14],[49,34.14],
+      [50,36.99],[51,36.99],[52,36.99],[53,36.99],[54,36.99],[55,36.99],[56,36.99],[57,36.99],[58,36.99],[59,36.99],
+      [60,37.07],[61,37.07],[62,37.07],[63,37.07],[64,37.07],[65,37.07],
+      [66,44.67],[67,44.67],[68,44.67],[69,44.67],[70,44.67],[71,44.67],[72,44.67],[73,44.67],[74,44.67],[75,44.67],
+    ];
+    const xMax = 75, yMax = 50;
+    const xS = x => PAD_L + (x / xMax) * plotW;
+    const yS = y => PAD_T + plotH - (y / yMax) * plotH;
+    // gridlines
+    [0, 10, 20, 30, 40, 50].forEach(v => {
+      const y = yS(v);
+      const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      l.setAttribute('x1', PAD_L); l.setAttribute('x2', W - PAD_R);
+      l.setAttribute('y1', y); l.setAttribute('y2', y);
+      l.setAttribute('stroke', '#2a2a3a'); l.setAttribute('stroke-dasharray', '2 3');
+      svg.appendChild(l);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', PAD_L - 6); t.setAttribute('y', y + 4);
+      t.setAttribute('text-anchor', 'end'); t.setAttribute('font-family', 'JetBrains Mono');
+      t.setAttribute('font-size', '10'); t.setAttribute('fill', '#5e5e78');
+      t.textContent = v; svg.appendChild(t);
+    });
+    // Exploit region shading
+    const shade = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    shade.setAttribute('x', xS(20)); shade.setAttribute('y', PAD_T);
+    shade.setAttribute('width', xS(xMax) - xS(20)); shade.setAttribute('height', plotH);
+    shade.setAttribute('fill', 'rgba(248,113,113,0.07)'); svg.appendChild(shade);
+
+    // Exploit arrow + label
+    const arr = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    arr.setAttribute('x1', xS(19)); arr.setAttribute('x2', xS(20));
+    arr.setAttribute('y1', yS(4)); arr.setAttribute('y2', yS(24));
+    arr.setAttribute('stroke', '#f87171'); arr.setAttribute('stroke-width', '1.5');
+    arr.setAttribute('stroke-dasharray', '2 2'); svg.appendChild(arr);
+
+    const exploitLbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    exploitLbl.setAttribute('x', xS(22)); exploitLbl.setAttribute('y', yS(24) - 8);
+    exploitLbl.setAttribute('font-family', 'JetBrains Mono'); exploitLbl.setAttribute('font-size', '10');
+    exploitLbl.setAttribute('fill', '#f87171'); exploitLbl.textContent = 'gen 20: exploit found';
+    svg.appendChild(exploitLbl);
+
+    // line
+    const pts = data.map(d => `${xS(d[0])},${yS(d[1])}`).join(' ');
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    line.setAttribute('fill', 'none'); line.setAttribute('stroke', '#fb923c');
+    line.setAttribute('stroke-width', '2'); line.setAttribute('points', pts);
+    svg.appendChild(line);
+    // dots at transitions
+    const markers = [[0,0.84],[19,3.99],[20,24.62],[40,34.14],[50,36.99],[60,37.07],[66,44.67]];
+    markers.forEach(d => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', xS(d[0])); c.setAttribute('cy', yS(d[1]));
+      c.setAttribute('r', '3.5'); c.setAttribute('fill', '#fb923c');
+      c.setAttribute('stroke', '#0a0a0f'); c.setAttribute('stroke-width', '1.5');
+      svg.appendChild(c);
+    });
+    // x-axis labels
+    [0, 20, 40, 60, 75].forEach(t => {
+      const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      lbl.setAttribute('x', xS(t)); lbl.setAttribute('y', H - 14);
+      lbl.setAttribute('text-anchor', 'middle'); lbl.setAttribute('font-family', 'JetBrains Mono');
+      lbl.setAttribute('font-size', '10'); lbl.setAttribute('fill', '#5e5e78');
+      lbl.textContent = `gen ${t}`; svg.appendChild(lbl);
+    });
+    const xl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    xl.setAttribute('x', W / 2); xl.setAttribute('y', H - 2);
+    xl.setAttribute('text-anchor', 'middle'); xl.setAttribute('font-family', 'Outfit');
+    xl.setAttribute('font-size', '10'); xl.setAttribute('fill', '#9898b0');
+    xl.textContent = 'generation →'; svg.appendChild(xl);
+    const yl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    yl.setAttribute('x', -H / 2); yl.setAttribute('y', 12);
+    yl.setAttribute('text-anchor', 'middle'); yl.setAttribute('transform', 'rotate(-90)');
+    yl.setAttribute('font-family', 'Outfit'); yl.setAttribute('font-size', '10'); yl.setAttribute('fill', '#9898b0');
+    yl.textContent = 'max fitness'; svg.appendChild(yl);
+  })();
+</script>
+</body>
+</html>

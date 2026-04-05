@@ -83,6 +83,11 @@ pub struct EvolutionParams {
     /// window in the middle. Closes the "ground-torque-against-a-joint-limit"
     /// exploit (see `docs/debugging-creature-physics.html`).
     ///
+    /// Also zeroes multi-body creatures whose joints are *all* Rigid: they
+    /// have no DOFs and no brain-drivable actuation, so any fitness they
+    /// earn comes from the physics solver shoving the welded assembly
+    /// around — the "rigid-skate" exploit. See `docs/shifty-movement.html`.
+    ///
     /// Sims 1994: no such requirement — creatures' cyclic gaits were the only
     /// locomotion strategy available in his setup, so static-pose drift didn't emerge.
     /// Our variant: Rapier's PGS contact solver + joint-limit constraints can produce
@@ -311,11 +316,28 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     };
 
     // Joint-motion coefficient: mean of per-DOF min-window-stddevs, normalized.
-    // A creature with no joints (one body) gets coefficient 1.0 — the penalty
-    // only applies when there IS a brain→joint control path that could exploit.
-    let motion_coef = match (params.min_joint_motion, dof_index.is_empty()) {
-        (None, _) | (_, true) => 1.0,
-        (Some(threshold), false) => {
+    //
+    // We distinguish three "no DOFs to measure" cases:
+    //
+    //   1. feature disabled (None)                → 1.0   (paper-faithful)
+    //   2. single-body creature (num_bodies == 1) → 1.0   (truly cannot exploit
+    //                                                      joints; legitimate)
+    //   3. multi-body with ALL-Rigid joints       → 0.0   (rigid-welded assembly,
+    //                                                      any motion comes from
+    //                                                      the physics solver
+    //                                                      shoving it around —
+    //                                                      the creature 900423 /
+    //                                                      evo 48 "shifty skate"
+    //                                                      exploit)
+    //
+    // Previously cases 2 and 3 were conflated behind `dof_index.is_empty()`,
+    // which let every rigid-welded assembly through with coefficient 1.0.
+    let num_bodies = creature.world.bodies.len();
+    let motion_coef = match (params.min_joint_motion, num_bodies == 1, dof_index.is_empty()) {
+        (None, _, _) => 1.0,
+        (_, true, _) => 1.0,
+        (Some(_), false, true) => 0.0,
+        (Some(threshold), false, false) => {
             // If no window ever completed (sim shorter than WINDOW_SECONDS)
             // fall back to coefficient 1.0 — not enough data to penalize.
             if !min_window_stddev.iter().any(|sd| sd.is_finite()) {
@@ -970,6 +992,51 @@ mod tests {
         // fitness. The point is the multiplier is bypassed.
         assert!(result.score.is_finite());
         assert!(result.score >= 0.0);
+    }
+
+    #[test]
+    fn motion_coef_zeroes_rigid_only_multi_body() {
+        // A multi-body creature whose joints are *all* Rigid has no DOFs —
+        // the brain has nothing to actuate, so any fitness it earns comes
+        // from Rapier's contact solver shoving a welded assembly around
+        // (the "rigid skate" exploit on creature 900423 / evolution 48).
+        // With min_joint_motion enabled, this MUST score zero — the guard
+        // clause used to let it through because `dof_index.is_empty()` is
+        // true for both single-body creatures (legitimate exempt) and
+        // rigid-welded assemblies (exploit). Those two cases should
+        // now diverge.
+        let rigid_node = || MorphNode {
+            dimensions: DVec3::new(0.4, 0.4, 0.1), // flat plate, skating-friendly
+            joint_type: JointType::Rigid,
+            joint_limit_min: [-1.0; 3],
+            joint_limit_max: [1.0; 3],
+            recursive_limit: 1,
+            terminal_only: false,
+            brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+        };
+        let genome = GenomeGraph {
+            nodes: vec![rigid_node(), rigid_node()],
+            connections: vec![MorphConn {
+                source: 0,
+                target: 1,
+                parent_face: AttachFace::PosX,
+                child_face: AttachFace::NegX,
+                scale: 1.0,
+                reflection: false,
+            }],
+            root: 0,
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+        };
+        let r_on = evaluate_fitness(&genome, &land_params_with_motion(Some(0.3)));
+        assert_eq!(
+            r_on.score, 0.0,
+            "multi-body all-Rigid creature must score 0 when min_joint_motion \
+             is enabled (this is the creature 900423 / evo 48 exploit pattern)"
+        );
+        // And as a sanity check — with the feature disabled, the same creature
+        // still gets whatever fitness the physics gives it (not our concern).
+        let r_off = evaluate_fitness(&genome, &land_params_with_motion(None));
+        assert!(r_off.score.is_finite() && r_off.score >= 0.0);
     }
 
     #[test]
