@@ -99,6 +99,22 @@ pub struct EvolutionParams {
     /// pinned at a limit for the whole window fails.
     #[serde(default = "default_min_joint_motion")]
     pub min_joint_motion: Option<f64>,
+    /// Seconds of "settle" simulation before fitness measurement begins. On
+    /// Land, creatures spawn at y=2.0 and fall; without a settle period the
+    /// horizontal tumble during/after landing counts toward fitness, giving
+    /// every creature a free ~1 m baseline regardless of whether its brain
+    /// actually drove any motion. With a settle period, the position at the
+    /// end of the settle phase is used as the reference for distance and
+    /// max-displacement, so passive free-fall drift is excluded from score.
+    ///
+    /// Sims 1994: no settle period — creatures in water are neutrally
+    /// buoyant and don't fall into the simulation.
+    /// Our variant: ~1 second of settle on Land so free-fall drift doesn't
+    /// pollute the locomotion score. Set to `None` to disable (paper-faithful
+    /// for water, but Land evolutions will have a ~1-point passive baseline).
+    /// Default: 1.0 s.
+    #[serde(default = "default_settle_duration")]
+    pub settle_duration: Option<f64>,
 }
 
 fn default_gravity() -> f64 { 9.81 }
@@ -107,6 +123,7 @@ fn default_max_body_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_num_islands() -> usize { 1 }
 fn default_migration_interval() -> usize { 20 }
 fn default_min_joint_motion() -> Option<f64> { Some(0.15) }
+fn default_settle_duration() -> Option<f64> { Some(1.0) }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
@@ -127,6 +144,7 @@ impl Default for EvolutionParams {
             num_islands: 1,
             migration_interval: 20,
             min_joint_motion: Some(0.3),
+            settle_duration: Some(1.0),
         }
     }
 }
@@ -184,10 +202,34 @@ const MAX_PLAUSIBLE_SPEED: f64 = 8.0;
 fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> FitnessResult {
     let dt = 1.0 / 60.0;
     let total_steps = (params.sim_duration / dt).round() as usize;
-    let early_check_step = (2.0 / dt).round() as usize;
-    let initial_pos = creature.world.transforms[creature.world.root].translation;
+    // Settle phase: run physics but don't accumulate fitness signals. The
+    // `settle_duration` is the *minimum* settle time; we additionally extend
+    // the settle dynamically until the root body's speed has been below
+    // SETTLE_SPEED_THRESHOLD for SETTLE_STABLE_FRAMES consecutive frames, so
+    // creatures that balance-then-topple don't leak their topple into eval.
+    // Capped at `max_settle_steps` to preserve evaluation budget.
+    // (See `settle_duration` doc on EvolutionParams.)
+    const SETTLE_SPEED_THRESHOLD: f64 = 0.05;  // m/s
+    const SETTLE_STABLE_FRAMES: usize = 15;     // 0.25 s at 60 Hz
+    let min_settle_steps: usize = params
+        .settle_duration
+        .map(|s| (s / dt).round() as usize)
+        .unwrap_or(0);
+    // Cap settle at 50% of total sim so evaluation window is always ≥ 50%.
+    let max_settle_steps: usize = (total_steps / 2).max(min_settle_steps);
+    let spawn_pos = creature.world.transforms[creature.world.root].translation;
+    // `initial_pos` is overwritten at the end of the settle phase to become
+    // the reference point for distance + max_displacement. Post-settle we
+    // measure the creature's locomotion, not its free-fall drift.
+    let mut initial_pos = spawn_pos;
     let mut max_displacement: f64 = 0.0;
     let mut prev_pos = initial_pos;
+    // Dynamic settle tracking.
+    let mut stable_count: usize = 0;
+    let mut actual_settle_steps: usize = 0;
+    let settle_enabled = params.settle_duration.is_some();
+    // early_check measured in post-settle frames; if settle disabled, use 2s from spawn.
+    let mut early_check_step: usize = if settle_enabled { 0 } else { (2.0 / dt).round() as usize };
 
     // Capture initial body rotations for per-frame angular velocity tracking.
     // (See `max_body_angular_velocity` doc on EvolutionParams.)
@@ -221,6 +263,29 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     for step in 0..total_steps {
         creature.step(dt);
         let pos = creature.world.transforms[creature.world.root].translation;
+
+        // Dynamic settle: if enabled, monitor root speed. When we've had
+        // SETTLE_STABLE_FRAMES frames in a row with speed below threshold
+        // (and we've passed min_settle_steps), end the settle phase and
+        // rebase. Also end settle if we've hit max_settle_steps.
+        if settle_enabled && actual_settle_steps == 0 {
+            let frame_speed = (pos - prev_pos).length() / dt;
+            if frame_speed < SETTLE_SPEED_THRESHOLD {
+                stable_count += 1;
+            } else {
+                stable_count = 0;
+            }
+            let min_reached = step + 1 >= min_settle_steps;
+            let settled = stable_count >= SETTLE_STABLE_FRAMES && min_reached;
+            let capped = step + 1 >= max_settle_steps;
+            if settled || capped {
+                actual_settle_steps = step + 1;
+                initial_pos = pos;
+                max_displacement = 0.0;
+                early_check_step = actual_settle_steps + (2.0 / dt).round() as usize;
+            }
+        }
+
         let disp = (pos - initial_pos).length();
 
         // Physics divergence check: NaN, implausible distance, or speed.
@@ -259,6 +324,13 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
                 prev_rotations[i] = cur_q;
             }
         }
+
+        // Skip Welford joint-angle stats during settle: we only care about
+        // joint motion AFTER the creature has landed. Otherwise landing
+        // impacts can spuriously inflate window stddev for frozen joints.
+        if settle_enabled && actual_settle_steps == 0 { continue; }
+        // Also skip the very frame where settle ends (step+1 == actual_settle_steps)
+        // because we just reset initial_pos above; joint sampling starts next frame.
 
         // Update in-window joint-angle Welford accumulators.
         for (i, &(ji, d)) in dof_index.iter().enumerate() {
@@ -306,6 +378,7 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     }
 
     let final_pos = creature.world.transforms[creature.world.root].translation;
+    // `initial_pos` is either the spawn (if no settle) or post-settle.
     let distance = (final_pos - initial_pos).length();
     let horizontal_distance = match params.environment {
         Environment::Land => {
@@ -920,6 +993,7 @@ mod tests {
             num_islands: 1,
             migration_interval: 20,
             min_joint_motion,
+            settle_duration: Some(1.0),
         }
     }
 
@@ -992,6 +1066,50 @@ mod tests {
         // fitness. The point is the multiplier is bypassed.
         assert!(result.score.is_finite());
         assert!(result.score >= 0.0);
+    }
+
+    #[test]
+    fn settle_duration_kills_freefall_fitness() {
+        // A single-body creature with no effectors spawned at y=2.0 on Land
+        // falls, tumbles on landing, and ends up ~1 m from spawn — enough
+        // to score ~1.27 fitness purely from passive physics. With a 1-second
+        // settle period, the post-settle position becomes the reference, so
+        // the fall-and-tumble phase is excluded from score.
+        let genome = GenomeGraph {
+            nodes: vec![MorphNode {
+                // Asymmetric dimensions → tumbles on impact.
+                dimensions: DVec3::new(0.5, 0.2, 0.3),
+                joint_type: JointType::Rigid,
+                joint_limit_min: [-1.0; 3],
+                joint_limit_max: [1.0; 3],
+                recursive_limit: 1,
+                terminal_only: false,
+                brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+            }],
+            connections: Vec::new(),
+            root: 0,
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+        };
+
+        let mut p = land_params_with_motion(Some(0.3));
+        p.sim_duration = 4.0;
+        p.settle_duration = None;
+        let r_no_settle = evaluate_fitness(&genome, &p);
+
+        p.settle_duration = Some(1.0);
+        let r_settled = evaluate_fitness(&genome, &p);
+
+        assert!(
+            r_no_settle.score > 0.2,
+            "without settle, free-fall should give ≥0.2 baseline fitness; got {}",
+            r_no_settle.score
+        );
+        assert!(
+            r_settled.score < r_no_settle.score * 0.3 + 0.05,
+            "settle_duration should kill free-fall fitness; \
+             no_settle={:.3} settled={:.3}",
+            r_no_settle.score, r_settled.score
+        );
     }
 
     #[test]

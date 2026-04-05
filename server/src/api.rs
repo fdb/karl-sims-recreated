@@ -7,6 +7,7 @@ use karl_sims_core::fitness::{Environment, EvolutionParams, FitnessGoal};
 
 use crate::coordinator;
 use crate::db::{self, DbPool};
+use crate::timing::{db_read_async, timed_db};
 use crate::ws::UpdateSender;
 
 #[derive(Clone)]
@@ -105,13 +106,11 @@ async fn list_evolutions(State(state): State<AppState>) -> Json<Vec<EvolutionInf
     // All DB calls in handlers go through `spawn_blocking`. They are
     // synchronous rusqlite calls, and we don't want them occupying a tokio
     // runtime worker (which would block unrelated HTTP traffic).
-    let db = state.db.clone();
-    let evos = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::list_evolutions(&conn)
+    // `db_read_async` measures all three latencies — see `timing.rs`.
+    let evos = db_read_async("api.list_evolutions", state.db.clone(), |c| {
+        db::list_evolutions(c)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(
         evos.into_iter()
             .map(|e| EvolutionInfo {
@@ -153,20 +152,19 @@ async fn create_evolution(
         // If the caller omits min_joint_motion we keep the default (Some(0.3)).
         // Callers can pass `null` (→ None) to disable, or a concrete number.
         min_joint_motion: req.min_joint_motion.or(Some(0.3)),
+        // 1.0 s settle keeps free-fall drift out of the fitness score.
+        settle_duration: Some(1.0),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
-        let db = state.db.clone();
         let config_json = config_json.clone();
         let name = req.name.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = db.get().expect("pool get");
-            // Pre-creation we don't know the row id, so we can't store a specific
-            // seed yet. Pass None — get_evolution_seed will fall back to the id.
-            db::create_evolution(&conn, &config_json, name.as_deref(), None)
+        // Pre-creation we don't know the row id, so we can't store a specific
+        // seed yet. Pass None — get_evolution_seed will fall back to the id.
+        db_read_async("api.create_evolution", state.db.clone(), move |c| {
+            db::create_evolution(c, &config_json, name.as_deref(), None)
         })
         .await
-        .expect("spawn_blocking join")
     };
 
     // Spawn coordinator for this evolution.
@@ -183,13 +181,12 @@ async fn get_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let db = state.db.clone();
-    let full = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::get_evolution_full(&conn, id)
+    // The hot read: UI polls this for evolution status/generation. Expect
+    // sub-ms query, sub-ms acquire. Any spike here is the bug we're hunting.
+    let full = db_read_async("api.get_evolution", state.db.clone(), move |c| {
+        db::get_evolution_full(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     match full {
         Some((status, generation, config_json, name)) => {
             let config = serde_json::from_str::<serde_json::Value>(&config_json)
@@ -213,14 +210,11 @@ async fn patch_evolution(
 ) -> Json<serde_json::Value> {
     // Trim whitespace; treat empty string as None (remove name)
     let name = req.name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let db = state.db.clone();
     let name_for_db = name.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::set_evolution_name(&conn, id, name_for_db.as_deref());
+    db_read_async("api.patch_evolution", state.db.clone(), move |c| {
+        db::set_evolution_name(c, id, name_for_db.as_deref())
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(serde_json::json!({"id": id, "name": name}))
 }
 
@@ -228,15 +222,12 @@ async fn delete_evolution_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let db = state.db.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
+    db_read_async("api.delete_evolution", state.db.clone(), move |c| {
         // Stop first so the coordinator task exits on its next status check.
-        db::stop_evolution(&conn, id);
-        db::delete_evolution(&conn, id);
+        db::stop_evolution(c, id);
+        db::delete_evolution(c, id);
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     axum::http::StatusCode::NO_CONTENT
 }
 
@@ -244,13 +235,10 @@ async fn get_best(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let db = state.db.clone();
-    let best = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::get_best_genotypes(&conn, id, 10)
+    let best = db_read_async("api.get_best", state.db.clone(), move |c| {
+        db::get_best_genotypes(c, id, 10)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(
         best.into_iter()
             .map(|(gid, fitness, _bytes, island_id)| {
@@ -264,13 +252,10 @@ async fn get_best_per_island_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let db = state.db.clone();
-    let best = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::get_best_per_island(&conn, id)
+    let best = db_read_async("api.get_best_per_island", state.db.clone(), move |c| {
+        db::get_best_per_island(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(
         best.into_iter()
             .map(|(gid, fitness, island_id)| {
@@ -284,13 +269,10 @@ async fn stop_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let db = state.db.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::stop_evolution(&conn, id);
+    db_read_async("api.stop_evolution", state.db.clone(), move |c| {
+        db::stop_evolution(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(serde_json::json!({"status": "stopped"}))
 }
 
@@ -298,13 +280,10 @@ async fn pause_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let db = state.db.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::pause_evolution(&conn, id);
+    db_read_async("api.pause_evolution", state.db.clone(), move |c| {
+        db::pause_evolution(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(serde_json::json!({"status": "paused"}))
 }
 
@@ -312,13 +291,10 @@ async fn resume_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let db = state.db.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::resume_evolution(&conn, id);
+    db_read_async("api.resume_evolution", state.db.clone(), move |c| {
+        db::resume_evolution(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(serde_json::json!({"status": "running"}))
 }
 
@@ -337,26 +313,18 @@ async fn replay_evolution(
 ) -> Json<serde_json::Value> {
     // Read source config + name + seed, then insert new row in a single
     // connection checkout. Seed is inherited verbatim.
-    let db = state.db.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        let full = db::get_evolution_full(&conn, id)?;
+    let result = db_read_async("api.replay_evolution", state.db.clone(), move |c| {
+        let full = db::get_evolution_full(c, id)?;
         let (_status, _gen, config_json, src_name) = full;
-        let seed = db::get_evolution_seed(&conn, id);
+        let seed = db::get_evolution_seed(c, id);
         let new_name = Some(match src_name {
             Some(n) => format!("Replay of {n}"),
             None => format!("Replay of #{id}"),
         });
-        let new_id = db::create_evolution(
-            &conn,
-            &config_json,
-            new_name.as_deref(),
-            Some(seed),
-        );
+        let new_id = db::create_evolution(c, &config_json, new_name.as_deref(), Some(seed));
         Some((new_id, config_json))
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     let (new_id, config_json) = match result {
         Some(x) => x,
         None => return Json(serde_json::json!({"error": "source evolution not found"})),
@@ -381,13 +349,12 @@ async fn get_evolution_stats(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let db = state.db.clone();
-    let stats = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::get_generation_stats(&conn, id)
+    // UI chart data: can be expensive as generations accumulate — a GROUP BY
+    // over all genotypes in the evolution. Watch query-p99 here.
+    let stats = db_read_async("api.get_evolution_stats", state.db.clone(), move |c| {
+        db::get_generation_stats(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(
         stats
             .into_iter()
@@ -406,13 +373,10 @@ async fn get_island_stats_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let db = state.db.clone();
-    let stats = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::get_island_stats(&conn, id)
+    let stats = db_read_async("api.get_island_stats", state.db.clone(), move |c| {
+        db::get_island_stats(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     Json(
         stats
             .into_iter()
@@ -432,13 +396,10 @@ async fn get_genome_bytes(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let db = state.db.clone();
-    let bytes = tokio::task::spawn_blocking(move || {
-        let conn = db.get().expect("pool get");
-        db::get_genotype(&conn, id)
+    let bytes = db_read_async("api.get_genome_bytes", state.db.clone(), move |c| {
+        db::get_genotype(c, id)
     })
-    .await
-    .expect("spawn_blocking join");
+    .await;
     match bytes {
         Some(bytes) => (
             [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
@@ -462,10 +423,9 @@ async fn get_phenotype_info(
     // the BLOB read completes, before the CPU-heavy JSON tree is built.
     let db = state.db.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
-        let bytes = {
-            let conn = db.get().expect("pool get");
-            db::get_genotype(&conn, id)
-        };
+        // Only the BLOB read is DB work; the develop() + JSON build below is
+        // CPU-bound and shouldn't be attributed to query latency.
+        let bytes = timed_db("api.get_phenotype_info", &db, |c| db::get_genotype(c, id));
         let bytes = bytes.ok_or(axum::http::StatusCode::NOT_FOUND)?;
         let genome = bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes)
             .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -526,10 +486,7 @@ async fn get_genotype_info(
     // tree over neurons/connections is built.
     let db = state.db.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
-        let bytes = {
-            let conn = db.get().expect("pool get");
-            db::get_genotype(&conn, id)
-        };
+        let bytes = timed_db("api.get_genotype_info", &db, |c| db::get_genotype(c, id));
         let bytes = bytes.ok_or(axum::http::StatusCode::NOT_FOUND)?;
         let genome = bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes)
             .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;

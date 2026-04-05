@@ -431,15 +431,29 @@ impl RapierState {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Extract rotation angle about `axis` from quaternion `q`.
-/// Uses 2 * atan2(q.vector · axis, q.scalar).
+/// Extract rotation angle about `axis` from quaternion `q`, stably in [-π, π].
+///
+/// Uses `2 * atan2(q.vector · axis, q.scalar)`, but first canonicalises `q` so
+/// that `q.w >= 0`. Without canonicalisation, quaternion sign-flip (which is
+/// physically the same rotation: q and -q both represent R) makes the reported
+/// angle jump by 2π across frames — creating a spurious ~377 rad/s apparent
+/// angular velocity that poisons any downstream consumer doing angle-delta
+/// analysis (min_joint_motion Welford accumulator, scanners, plots).
+///
+/// This is an *observation* function — it only affects what we read out of
+/// `joint.angles`, not the physics simulation itself.
 fn angle_about_axis(q: DQuat, axis: DVec3) -> f64 {
     let axis = axis.normalize_or_zero();
     if axis.length_squared() < 1e-10 {
         return 0.0;
     }
-    let v_proj = DVec3::new(q.x, q.y, q.z).dot(axis);
-    2.0 * f64::atan2(v_proj, q.w)
+    // Canonicalise: flip sign so q.w is non-negative. q and -q represent the
+    // same physical rotation, so this is a no-op on dynamics but produces a
+    // continuous angle signal in [-π, π].
+    let sign = if q.w < 0.0 { -1.0 } else { 1.0 };
+    let w = sign * q.w;
+    let v_proj = sign * DVec3::new(q.x, q.y, q.z).dot(axis);
+    2.0 * f64::atan2(v_proj, w)
 }
 
 fn body_rotation(
@@ -487,6 +501,29 @@ mod tests {
     use super::*;
     use crate::body::RigidBody;
     use crate::joint::Joint;
+
+    #[test]
+    fn angle_about_axis_stable_under_quaternion_sign_flip() {
+        // q and -q represent the same physical rotation. Without
+        // canonicalisation the two give angles 2π apart, creating
+        // a spurious discontinuity in observed joint angle.
+        let axis = DVec3::new(0.0, 0.0, 1.0);
+        for theta_deg in [-170.0, -90.0, 0.0, 45.0, 90.0, 170.0] {
+            let theta = (theta_deg as f64).to_radians();
+            let q = DQuat::from_axis_angle(axis, theta);
+            let q_neg = DQuat::from_xyzw(-q.x, -q.y, -q.z, -q.w);
+            let a = angle_about_axis(q, axis);
+            let a_neg = angle_about_axis(q_neg, axis);
+            assert!(
+                (a - a_neg).abs() < 1e-9,
+                "angle_about_axis({theta_deg}°) unstable under q→-q: {a} vs {a_neg}"
+            );
+            assert!(
+                (a - theta).abs() < 1e-9,
+                "angle_about_axis should recover the original angle for {theta_deg}°: got {a}"
+            );
+        }
+    }
 
     fn make_single_body_world() -> (Vec<RigidBody>, Vec<Joint>, Vec<DAffine3>) {
         let body = RigidBody::new(DVec3::splat(0.5));
