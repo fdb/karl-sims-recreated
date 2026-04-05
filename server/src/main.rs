@@ -65,9 +65,12 @@ async fn main() {
                 )),
         );
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+    // Bind to [::] (IPv6 wildcard) for dual-stack: accepts both IPv4 and
+    // IPv6 clients. 0.0.0.0 is IPv4-only, which breaks browsers that
+    // prefer IPv6 resolution of "localhost" (::1) — common on macOS.
+    let listener = tokio::net::TcpListener::bind("[::]:3000")
         .await
         .unwrap();
-    log::info!("HTTP server on http://localhost:3000");
+    log::info!("HTTP server on http://localhost:3000 (dual-stack IPv4+IPv6)");
     axum::serve(listener, app).await.unwrap();
 }
