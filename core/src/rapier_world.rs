@@ -240,6 +240,15 @@ impl RapierState {
                 &(),
                 &(),
             );
+
+            // Clamp per-body velocities after each sub-step. Prevents runaway
+            // contact-kick amplification: a body rotating at 100+ rad/s that
+            // clips the ground gains massive linear velocity from the
+            // penetration-recovery impulse, which then kicks it out of the
+            // world. Clamping caps the feedback loop at each sub-step so
+            // fast-spinning bodies simply stop gaining energy rather than
+            // tunnelling through contacts.
+            self.clamp_velocities();
         }
 
         // ── Post-frame: sync transforms back to World ─────────────────────────
@@ -247,6 +256,30 @@ impl RapierState {
 
         // ── Post-frame: compute joint angles from relative body orientations ──
         self.sync_joint_angles(world_joints, world_transforms);
+    }
+
+    /// Cap each body's linear speed at MAX_LINVEL and angular speed at MAX_ANGVEL.
+    /// These are generous bounds (20 m/s ≈ 72 km/h, 30 rad/s ≈ 5 rev/s) — faster
+    /// than any real creature moves but tight enough to prevent contact-kick
+    /// runaway. Scales the velocity vector rather than clipping components so
+    /// direction is preserved.
+    fn clamp_velocities(&mut self) {
+        const MAX_LINVEL: f64 = 20.0;
+        const MAX_ANGVEL: f64 = 30.0;
+        for handle in &self.body_handles {
+            if let Some(rb) = self.bodies.get_mut(*handle) {
+                let v = rb.linvel();
+                let speed = v.length();
+                if speed > MAX_LINVEL {
+                    rb.set_linvel(v * (MAX_LINVEL / speed), true);
+                }
+                let w = rb.angvel();
+                let wmag = w.length();
+                if wmag > MAX_ANGVEL {
+                    rb.set_angvel(w * (MAX_ANGVEL / wmag), true);
+                }
+            }
+        }
     }
 
     fn apply_torques(
