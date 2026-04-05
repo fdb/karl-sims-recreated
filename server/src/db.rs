@@ -57,6 +57,21 @@ pub fn init_db(path: &str) -> DbPool {
     )
     .ok(); // Silently ignores "duplicate column" error on subsequent startups.
 
+    // Migrate: add island_id column for islands-model evolution. Default 0
+    // so existing evolutions (single-pool) keep working transparently.
+    conn.execute(
+        "ALTER TABLE genotypes ADD COLUMN island_id INTEGER NOT NULL DEFAULT 0",
+        [],
+    )
+    .ok();
+
+    // Index to speed up per-island, per-generation lookups.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_genotypes_evo_island_gen
+         ON genotypes(evolution_id, island_id, generation);",
+    )
+    .ok();
+
     // Reset any tasks stuck in 'running' state from a previous crash.
     // These would never be picked up otherwise.
     conn.execute(
@@ -87,17 +102,20 @@ pub fn set_evolution_name(conn: &Connection, evo_id: i64, name: Option<&str>) {
     .expect("Failed to update evolution name");
 }
 
-/// Insert a genotype, return its ID.
+/// Insert a genotype, return its ID. `island_id` is 0 for single-pool
+/// evolutions, or the island index for islands-model runs.
 pub fn insert_genotype(
     conn: &Connection,
     evo_id: i64,
     generation: i64,
     genome_bytes: &[u8],
     parent_id: Option<i64>,
+    island_id: i64,
 ) -> i64 {
     conn.execute(
-        "INSERT INTO genotypes (evolution_id, generation, genome_bytes, parent_id) VALUES (?1, ?2, ?3, ?4)",
-        params![evo_id, generation, genome_bytes, parent_id],
+        "INSERT INTO genotypes (evolution_id, generation, genome_bytes, parent_id, island_id)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![evo_id, generation, genome_bytes, parent_id, island_id],
     )
     .expect("Failed to insert genotype");
     conn.last_insert_rowid()
@@ -110,10 +128,12 @@ pub fn insert_genotype_with_fitness(
     generation: i64,
     genome_bytes: &[u8],
     fitness: f64,
+    island_id: i64,
 ) -> i64 {
     conn.execute(
-        "INSERT INTO genotypes (evolution_id, generation, genome_bytes, fitness) VALUES (?1, ?2, ?3, ?4)",
-        params![evo_id, generation, genome_bytes, fitness],
+        "INSERT INTO genotypes (evolution_id, generation, genome_bytes, fitness, island_id)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![evo_id, generation, genome_bytes, fitness, island_id],
     )
     .expect("Failed to insert genotype with fitness");
     let gid = conn.last_insert_rowid();
@@ -217,6 +237,32 @@ pub fn get_evolution_full(conn: &Connection, evo_id: i64) -> Option<(String, i64
     .ok()
 }
 
+/// Per-generation stats grouped by island.
+/// Returns rows of (generation, island_id, best_fitness, avg_fitness).
+pub fn get_island_stats(conn: &Connection, evo_id: i64) -> Vec<(i64, i64, f64, f64)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT g.generation, g.island_id, MAX(g.fitness), AVG(g.fitness)
+             FROM genotypes g
+             WHERE g.evolution_id = ?1 AND g.fitness IS NOT NULL
+             GROUP BY g.generation, g.island_id
+             ORDER BY g.generation, g.island_id",
+        )
+        .expect("Failed to prepare get_island_stats");
+
+    stmt.query_map(params![evo_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, f64>(2)?,
+            row.get::<_, f64>(3)?,
+        ))
+    })
+    .expect("Failed to query island stats")
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
 /// Get per-generation stats (best, avg fitness) for an evolution.
 pub fn get_generation_stats(conn: &Connection, evo_id: i64) -> Vec<(i64, f64, f64)> {
     let mut stmt = conn
@@ -241,7 +287,7 @@ pub fn get_generation_stats(conn: &Connection, evo_id: i64) -> Vec<(i64, f64, f6
     .collect()
 }
 
-/// Get all (genotype_id, fitness) pairs for a given generation.
+/// Get all (genotype_id, fitness) pairs for a given generation (across all islands).
 pub fn get_generation_fitnesses(conn: &Connection, evo_id: i64, generation: i64) -> Vec<(i64, f64)> {
     let mut stmt = conn
         .prepare(
@@ -262,6 +308,33 @@ pub fn get_generation_fitnesses(conn: &Connection, evo_id: i64, generation: i64)
     .collect()
 }
 
+/// Get (genotype_id, fitness) pairs for a given generation, scoped to one island.
+pub fn get_generation_fitnesses_by_island(
+    conn: &Connection,
+    evo_id: i64,
+    island_id: i64,
+    generation: i64,
+) -> Vec<(i64, f64)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT g.id, t.fitness
+             FROM genotypes g
+             JOIN tasks t ON t.genotype_id = g.id
+             WHERE g.evolution_id = ?1
+               AND g.island_id = ?2
+               AND g.generation = ?3
+               AND t.status = 'completed'",
+        )
+        .expect("Failed to prepare get_generation_fitnesses_by_island");
+
+    stmt.query_map(params![evo_id, island_id, generation], |row| {
+        Ok((row.get(0)?, row.get::<_, f64>(1)?))
+    })
+    .expect("Failed to query island fitnesses")
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
 /// Fetch the raw genome bytes for a genotype.
 pub fn get_genotype(conn: &Connection, genotype_id: i64) -> Option<Vec<u8>> {
     conn.query_row(
@@ -273,10 +346,15 @@ pub fn get_genotype(conn: &Connection, genotype_id: i64) -> Option<Vec<u8>> {
 }
 
 /// Get the top genotypes by fitness for an evolution.
-pub fn get_best_genotypes(conn: &Connection, evo_id: i64, limit: i64) -> Vec<(i64, f64, Vec<u8>)> {
+/// Returns (id, fitness, genome_bytes, island_id).
+pub fn get_best_genotypes(
+    conn: &Connection,
+    evo_id: i64,
+    limit: i64,
+) -> Vec<(i64, f64, Vec<u8>, i64)> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, fitness, genome_bytes FROM genotypes
+            "SELECT id, fitness, genome_bytes, island_id FROM genotypes
              WHERE evolution_id = ?1 AND fitness IS NOT NULL
              ORDER BY fitness DESC
              LIMIT ?2",
@@ -284,9 +362,34 @@ pub fn get_best_genotypes(conn: &Connection, evo_id: i64, limit: i64) -> Vec<(i6
         .expect("Failed to prepare get_best_genotypes");
 
     stmt.query_map(params![evo_id, limit], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
     })
     .expect("Failed to query best genotypes")
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
+/// Get the single best genotype from each island (top by fitness per island).
+/// Returns (id, fitness, island_id) sorted by island_id.
+pub fn get_best_per_island(conn: &Connection, evo_id: i64) -> Vec<(i64, f64, i64)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, fitness, island_id FROM genotypes g
+             WHERE evolution_id = ?1 AND fitness IS NOT NULL
+               AND fitness = (
+                 SELECT MAX(fitness) FROM genotypes
+                 WHERE evolution_id = ?1 AND island_id = g.island_id
+                   AND fitness IS NOT NULL
+               )
+             GROUP BY island_id
+             ORDER BY island_id",
+        )
+        .expect("Failed to prepare get_best_per_island");
+
+    stmt.query_map(params![evo_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })
+    .expect("Failed to query best per island")
     .filter_map(|r| r.ok())
     .collect()
 }
@@ -380,4 +483,71 @@ pub fn list_evolutions(conn: &Connection) -> Vec<EvolutionRow> {
     .expect("Failed to list evolutions")
     .filter_map(|r| r.ok())
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn mem_db() -> Connection {
+        // in-memory DB with the schema that init_db applies
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE evolutions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                config_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                current_gen INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                name TEXT
+            );
+            CREATE TABLE genotypes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                evolution_id INTEGER NOT NULL,
+                generation INTEGER NOT NULL,
+                genome_bytes BLOB NOT NULL,
+                parent_id INTEGER,
+                fitness REAL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                island_id INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                evolution_id INTEGER NOT NULL,
+                genotype_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                worker_id TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                fitness REAL
+            );"
+        ).unwrap();
+        conn
+    }
+
+    #[test]
+    fn island_fitness_query_returns_only_matching_island() {
+        let conn = mem_db();
+        let evo_id = create_evolution(&conn, "{}", None);
+        let bytes = vec![0u8, 1, 2];
+        // Insert 2 creatures in island 0 and 3 in island 1, all in gen 5.
+        let a = insert_genotype_with_fitness(&conn, evo_id, 5, &bytes, 1.0, 0);
+        let b = insert_genotype_with_fitness(&conn, evo_id, 5, &bytes, 2.0, 0);
+        let c = insert_genotype_with_fitness(&conn, evo_id, 5, &bytes, 10.0, 1);
+        let d = insert_genotype_with_fitness(&conn, evo_id, 5, &bytes, 20.0, 1);
+        let e = insert_genotype_with_fitness(&conn, evo_id, 5, &bytes, 30.0, 1);
+        let island0 = get_generation_fitnesses_by_island(&conn, evo_id, 0, 5);
+        let island1 = get_generation_fitnesses_by_island(&conn, evo_id, 1, 5);
+        assert_eq!(island0.len(), 2);
+        assert_eq!(island1.len(), 3);
+        let ids0: Vec<i64> = island0.iter().map(|(id, _)| *id).collect();
+        assert!(ids0.contains(&a) && ids0.contains(&b));
+        let ids1: Vec<i64> = island1.iter().map(|(id, _)| *id).collect();
+        assert!(ids1.contains(&c) && ids1.contains(&d) && ids1.contains(&e));
+        // And get_generation_fitnesses (all-islands) returns all 5.
+        let all = get_generation_fitnesses(&conn, evo_id, 5);
+        assert_eq!(all.len(), 5);
+    }
 }

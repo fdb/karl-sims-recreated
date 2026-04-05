@@ -5,16 +5,21 @@ import {
   pauseEvolution,
   resumeEvolution,
   getBestCreatures,
+  getBestPerIsland,
   getEvolutionStats,
+  getIslandStats,
   updateEvolutionName,
   deleteEvolution,
   type Evolution,
   type CreatureInfo,
   type GenerationStats,
+  type IslandStats,
 } from "../api";
 import { useEvolutionUpdates } from "../hooks/useWebSocket";
 import { navigate } from "../router";
 import FitnessChart from "../components/FitnessChart";
+import IslandFitnessChart from "../components/IslandFitnessChart";
+import IslandBestsGrid from "../components/IslandBestsGrid";
 import StatusBadge from "../components/StatusBadge";
 
 function formatFitness(v: number): string {
@@ -34,7 +39,9 @@ interface Props {
 export default function EvolutionDetail({ evoId }: Props) {
   const [evolution, setEvolution] = useState<Evolution | null>(null);
   const [bestCreatures, setBestCreatures] = useState<CreatureInfo[]>([]);
+  const [bestPerIsland, setBestPerIsland] = useState<CreatureInfo[]>([]);
   const [historicalStats, setHistoricalStats] = useState<GenerationStats[]>([]);
+  const [islandStats, setIslandStats] = useState<IslandStats[]>([]);
   const liveStats = useEvolutionUpdates();
 
   // Inline name editing
@@ -45,10 +52,24 @@ export default function EvolutionDetail({ evoId }: Props) {
   const refresh = useCallback(async () => {
     const evo = await getEvolution(evoId);
     setEvolution(evo);
-    const best = await getBestCreatures(evoId);
+    const useIslands = (evo.config?.num_islands ?? 1) > 1;
+    const [best, stats] = await Promise.all([
+      getBestCreatures(evoId),
+      getEvolutionStats(evoId),
+    ]);
     setBestCreatures(best);
-    const stats = await getEvolutionStats(evoId);
     setHistoricalStats(stats);
+    if (useIslands) {
+      const [perIsland, isStats] = await Promise.all([
+        getBestPerIsland(evoId),
+        getIslandStats(evoId),
+      ]);
+      setBestPerIsland(perIsland);
+      setIslandStats(isStats);
+    } else {
+      setBestPerIsland([]);
+      setIslandStats([]);
+    }
   }, [evoId]);
 
   useEffect(() => {
@@ -201,15 +222,29 @@ export default function EvolutionDetail({ evoId }: Props) {
         <div className="lg:col-span-3">
           <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
             <h2 className="text-sm font-medium text-text-secondary mb-3">
-              Fitness Over Generations
+              {islandStats.length > 0
+                ? "Per-Island Best Fitness"
+                : "Fitness Over Generations"}
             </h2>
-            <FitnessChart stats={chartStats} width={700} height={250} />
+            {islandStats.length > 0 ? (
+              <IslandFitnessChart stats={islandStats} width={700} height={280} />
+            ) : (
+              <FitnessChart stats={chartStats} width={700} height={250} />
+            )}
           </div>
         </div>
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-4">
+          {bestPerIsland.length > 0 && (
+            <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
+              <h2 className="text-sm font-medium text-text-secondary mb-3">
+                Best Per Island
+              </h2>
+              <IslandBestsGrid evoId={evoId} bestPerIsland={bestPerIsland} />
+            </div>
+          )}
           <div className="bg-bg-surface border border-border-subtle rounded-lg p-4">
             <h2 className="text-sm font-medium text-text-secondary mb-3">
-              Best Creatures
+              Top Creatures
             </h2>
             <div className="space-y-1">
               {bestCreatures.map((c) => (
@@ -222,7 +257,14 @@ export default function EvolutionDetail({ evoId }: Props) {
                   }}
                   className="flex items-center justify-between px-3 py-2 rounded hover:bg-bg-elevated transition-colors no-underline text-inherit"
                 >
-                  <span className="text-sm font-mono">#{c.id}</span>
+                  <span className="text-sm font-mono">
+                    #{c.id}
+                    {c.island_id !== undefined && bestPerIsland.length > 0 && (
+                      <span className="text-text-muted ml-2 text-xs">
+                        i{c.island_id}
+                      </span>
+                    )}
+                  </span>
                   <span className="text-sm text-text-secondary">
                     {formatFitness(c.fitness)}
                   </span>

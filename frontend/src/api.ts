@@ -7,6 +7,8 @@ export interface EvolutionConfig {
   environment: "Water" | "Land";
   sim_duration: number;
   max_parts: number;
+  num_islands?: number;
+  migration_interval?: number;
 }
 
 export interface Evolution {
@@ -20,6 +22,7 @@ export interface Evolution {
 export interface CreatureInfo {
   id: number;
   fitness: number;
+  island_id?: number;
 }
 
 export interface GenerationStats {
@@ -43,6 +46,8 @@ export interface CreateEvolutionParams {
   max_parts: number;
   gravity?: number;
   water_viscosity?: number;
+  num_islands?: number;
+  migration_interval?: number;
   name?: string;
 }
 
@@ -69,6 +74,13 @@ export async function getBestCreatures(
   return res.json();
 }
 
+export async function getBestPerIsland(
+  evoId: number,
+): Promise<CreatureInfo[]> {
+  const res = await fetch(`${API_BASE}/api/evolutions/${evoId}/best_per_island`);
+  return res.json();
+}
+
 export async function getEvolutionStats(
   evoId: number,
 ): Promise<GenerationStats[]> {
@@ -80,6 +92,18 @@ export async function getEvolutionStats(
     best_fitness: d.best_fitness,
     avg_fitness: d.avg_fitness,
   }));
+}
+
+export interface IslandStats {
+  generation: number;
+  island_id: number;
+  best_fitness: number;
+  avg_fitness: number;
+}
+
+export async function getIslandStats(evoId: number): Promise<IslandStats[]> {
+  const res = await fetch(`${API_BASE}/api/evolutions/${evoId}/island_stats`);
+  return res.json();
 }
 
 export async function stopEvolution(id: number): Promise<void> {

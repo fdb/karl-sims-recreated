@@ -5,13 +5,13 @@ use rand_chacha::ChaCha8Rng;
 use karl_sims_core::evolution::EvolutionConfig;
 use karl_sims_core::fitness::{EvolutionParams, FitnessConfig};
 use karl_sims_core::genotype::GenomeGraph;
-use karl_sims_core::evolution::Population;
 
 use tokio::sync::broadcast;
 
 use crate::db::{
-    create_task, get_evolution_status, get_evolution_full, get_genotype, get_generation_fitnesses,
-    insert_genotype, insert_genotype_with_fitness, pending_task_count, update_evolution, DbPool,
+    create_task, get_evolution_status, get_evolution_full, get_genotype,
+    get_generation_fitnesses, get_generation_fitnesses_by_island, insert_genotype,
+    insert_genotype_with_fitness, pending_task_count, update_evolution, DbPool,
 };
 
 /// Run a full evolution loop, persisting every generation to the database.
@@ -51,14 +51,23 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             || pending_task_count(&conn, evo_id) > 0
     };
 
+    // Split population across islands. `num_islands=1` preserves single-pool behavior.
+    let num_islands = params.num_islands.max(1);
+    let per_island_pop = (params.population_size / num_islands).max(1);
+
     if !has_genotypes {
-        log::info!("Evolution {evo_id}: creating initial population");
-        let pop = Population::random_initial(config.clone(), &mut rng);
+        log::info!(
+            "Evolution {evo_id}: creating initial population ({} islands × {} creatures = {} total)",
+            num_islands, per_island_pop, num_islands * per_island_pop,
+        );
         let conn = db.lock().unwrap();
-        for ind in &pop.individuals {
-            let bytes = bincode::serialize(&ind.genome).unwrap();
-            let gid = insert_genotype(&conn, evo_id, 0, &bytes, None);
-            create_task(&conn, evo_id, gid);
+        for island_id in 0..num_islands {
+            for _ in 0..per_island_pop {
+                let genome = GenomeGraph::random(&mut rng);
+                let bytes = bincode::serialize(&genome).unwrap();
+                let gid = insert_genotype(&conn, evo_id, 0, &bytes, None, island_id as i64);
+                create_task(&conn, evo_id, gid);
+            }
         }
     } else {
         log::info!("Evolution {evo_id}: resuming from generation {start_gen}");
@@ -102,155 +111,223 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
 
-        // Read fitness results for the current generation.
-        let fitnesses = {
+        // ── Load this generation's individuals, per island ────────────────
+        // Each island runs its own selection/reproduction cycle using only
+        // its own creatures; migration (below) shuttles elites between.
+        let mut island_individuals: Vec<Vec<(GenomeGraph, f64)>> =
+            vec![Vec::new(); num_islands];
+        for (island_id, bucket) in island_individuals.iter_mut().enumerate() {
             let conn = db.lock().unwrap();
-            get_generation_fitnesses(&conn, evo_id, cur_gen as i64)
-        };
-
-        // Reconstruct (genome, fitness) pairs from the database.
-        let mut individuals: Vec<(GenomeGraph, f64)> = Vec::new();
-        {
-            let conn = db.lock().unwrap();
-            for (gid, fitness) in &fitnesses {
+            let pairs = get_generation_fitnesses_by_island(
+                &conn, evo_id, island_id as i64, cur_gen as i64,
+            );
+            for (gid, fitness) in &pairs {
                 if let Some(bytes) = get_genotype(&conn, *gid) {
                     if let Ok(genome) = bincode::deserialize(&bytes) {
-                        individuals.push((genome, *fitness));
+                        bucket.push((genome, *fitness));
                     }
                 }
             }
+            bucket.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         }
 
-        // Sort by fitness descending.
-        individuals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Global stats for logging/WebSocket (aggregated across islands).
+        let total_individuals: Vec<&(GenomeGraph, f64)> =
+            island_individuals.iter().flatten().collect();
+        let global_best = total_individuals
+            .iter()
+            .map(|(_, f)| *f)
+            .fold(f64::NEG_INFINITY, f64::max)
+            .max(0.0);
+        let global_avg = if total_individuals.is_empty() {
+            0.0
+        } else {
+            total_individuals.iter().map(|(_, f)| f).sum::<f64>()
+                / total_individuals.len() as f64
+        };
+        if num_islands == 1 {
+            log::info!(
+                "Evolution {evo_id} Gen {cur_gen}: best={global_best:.4}, avg={global_avg:.4}, pop={}",
+                total_individuals.len()
+            );
+        } else {
+            let per_island: Vec<String> = island_individuals
+                .iter()
+                .enumerate()
+                .map(|(i, pop)| {
+                    let b = pop.first().map(|(_, f)| *f).unwrap_or(0.0);
+                    format!("i{i}={b:.2}")
+                })
+                .collect();
+            log::info!(
+                "Evolution {evo_id} Gen {cur_gen}: best={global_best:.4} avg={global_avg:.4} islands[{}]",
+                per_island.join(" ")
+            );
+        }
 
-        let best = individuals.first().map(|(_, f)| *f).unwrap_or(0.0);
-        let avg = individuals.iter().map(|(_, f)| f).sum::<f64>()
-            / individuals.len().max(1) as f64;
-        log::info!(
-            "Evolution {evo_id} Gen {cur_gen}: best={best:.4}, avg={avg:.4}, pop={}",
-            individuals.len()
-        );
-
-        // Broadcast generation stats to WebSocket clients.
         if let Some(ref tx) = tx {
             let msg = serde_json::json!({
                 "type": "generation",
                 "evolution_id": evo_id,
                 "generation": cur_gen,
-                "best_fitness": best,
-                "avg_fitness": avg,
+                "best_fitness": global_best,
+                "avg_fitness": global_avg,
             });
             tx.send(msg.to_string()).ok();
         }
 
-        // Handle the all-zero-fitness case: regenerate a random population.
-        if individuals.is_empty() || best <= 0.0 {
+        // All-zero recovery: if no island has any non-zero fitness, regenerate.
+        let any_progress = island_individuals
+            .iter()
+            .any(|pop| pop.iter().any(|(_, f)| *f > 0.0));
+        if !any_progress {
             log::warn!(
                 "Evolution {evo_id} Gen {cur_gen}: all zero fitness, regenerating random population"
             );
-            let fresh = Population::random_initial(config.clone(), &mut rng);
             let next_gen = cur_gen + 1;
-            {
-                let conn = db.lock().unwrap();
-                update_evolution(&conn, evo_id, "running", next_gen as i64);
-                for ind in &fresh.individuals {
-                    let bytes = bincode::serialize(&ind.genome).unwrap();
-                    let gid = insert_genotype(&conn, evo_id, next_gen as i64, &bytes, None);
+            let conn = db.lock().unwrap();
+            update_evolution(&conn, evo_id, "running", next_gen as i64);
+            for island_id in 0..num_islands {
+                for _ in 0..per_island_pop {
+                    let genome = GenomeGraph::random(&mut rng);
+                    let bytes = bincode::serialize(&genome).unwrap();
+                    let gid = insert_genotype(
+                        &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                    );
                     create_task(&conn, evo_id, gid);
                 }
             }
             continue;
         }
 
-        // Select survivors (top fraction by fitness).
-        let num_survivors =
-            (config.survival_ratio * individuals.len() as f64).ceil() as usize;
-        let survivors: Vec<GenomeGraph> = individuals
-            [..num_survivors.min(individuals.len())]
-            .iter()
-            .map(|(g, _)| g.clone())
-            .collect();
-        let survivor_fitnesses: Vec<f64> = individuals
-            [..num_survivors.min(individuals.len())]
-            .iter()
-            .map(|(_, f)| *f)
-            .collect();
-
-        if survivors.is_empty() {
-            break;
-        }
-
         // Prepare next generation.
         let next_gen = cur_gen + 1;
-        let mut offspring_count = 0;
         {
             let conn = db.lock().unwrap();
             update_evolution(&conn, evo_id, "running", next_gen as i64);
         }
 
-        // Keep survivors with their existing fitness (no re-evaluation needed).
-        for (genome, fitness) in survivors.iter().zip(survivor_fitnesses.iter()) {
-            let bytes = bincode::serialize(genome).unwrap();
-            let conn = db.lock().unwrap();
-            insert_genotype_with_fitness(&conn, evo_id, next_gen as i64, &bytes, *fitness);
-            offspring_count += 1;
-        }
-
-        // Periodic random injection: every INJECTION_INTERVAL generations,
-        // replace INJECTION_FRACTION of the offspring slots with fresh random
-        // genomes. This breaks selection out of local optima when the elite
-        // has stagnated, without wiping the population. (The survivors from
-        // this gen still persist, so we never lose good individuals.)
-        const INJECTION_INTERVAL: usize = 10;
-        const INJECTION_FRACTION: f64 = 0.10;
-        let inject_count = if next_gen > 0 && next_gen % INJECTION_INTERVAL == 0 {
-            (config.population_size as f64 * INJECTION_FRACTION).round() as usize
+        // ── Migration: ring topology, every `migration_interval` gens ───
+        // best_of[i] = island i's elite (to be shipped to island (i+1)%N)
+        let migration_active = num_islands > 1
+            && params.migration_interval > 0
+            && next_gen > 0
+            && next_gen % params.migration_interval == 0;
+        let best_of: Vec<Option<(GenomeGraph, f64)>> = if migration_active {
+            island_individuals
+                .iter()
+                .map(|pop| pop.first().cloned())
+                .collect()
         } else {
-            0
+            vec![None; num_islands]
         };
-        for _ in 0..inject_count {
-            if offspring_count >= config.population_size { break; }
-            let child = GenomeGraph::random(&mut rng);
-            let bytes = bincode::serialize(&child).unwrap();
-            let conn = db.lock().unwrap();
-            let gid = insert_genotype(&conn, evo_id, next_gen as i64, &bytes, None);
-            create_task(&conn, evo_id, gid);
-            offspring_count += 1;
-        }
-        if inject_count > 0 {
-            log::info!(
-                "Evolution {evo_id} Gen {next_gen}: injected {inject_count} random genomes"
-            );
+        if migration_active {
+            log::info!("Evolution {evo_id} Gen {next_gen}: migrating elites along ring");
         }
 
-        // Generate new offspring to fill the population.
-        while offspring_count < config.population_size {
-            let roll: f64 = rng.r#gen();
-            let child = if roll < config.asexual_ratio {
-                let parent = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                let mut child = parent.clone();
-                karl_sims_core::mutation::mutate(&mut child, &mut rng);
-                child
-            } else if roll < config.asexual_ratio + config.crossover_ratio {
-                let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                let mut child = karl_sims_core::mating::crossover(p1, p2, &mut rng);
-                karl_sims_core::mutation::mutate(&mut child, &mut rng);
-                child
+        // ── Per-island reproduction ─────────────────────────────────────
+        for island_id in 0..num_islands {
+            let individuals = &island_individuals[island_id];
+            if individuals.is_empty() {
+                continue;
+            }
+
+            // Select survivors (top survival_ratio of this island).
+            let num_survivors = (config.survival_ratio * individuals.len() as f64)
+                .ceil() as usize;
+            let survivors: Vec<GenomeGraph> = individuals
+                [..num_survivors.min(individuals.len())]
+                .iter()
+                .map(|(g, _)| g.clone())
+                .collect();
+            let survivor_fitnesses: Vec<f64> = individuals
+                [..num_survivors.min(individuals.len())]
+                .iter()
+                .map(|(_, f)| *f)
+                .collect();
+            if survivors.is_empty() {
+                continue;
+            }
+
+            let mut offspring_count = 0usize;
+
+            // Inbound migrant from previous island (ring topology).
+            let migrant = if migration_active {
+                let src = (island_id + num_islands - 1) % num_islands;
+                best_of[src].clone()
             } else {
-                let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                let mut child = karl_sims_core::mating::graft(p1, p2, &mut rng);
-                karl_sims_core::mutation::mutate(&mut child, &mut rng);
-                child
+                None
             };
+            if let Some((genome, fitness)) = &migrant {
+                let bytes = bincode::serialize(genome).unwrap();
+                let conn = db.lock().unwrap();
+                insert_genotype_with_fitness(
+                    &conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
+                );
+                offspring_count += 1;
+            }
 
-            let bytes = bincode::serialize(&child).unwrap();
-            let conn = db.lock().unwrap();
-            let gid = insert_genotype(&conn, evo_id, next_gen as i64, &bytes, None);
-            create_task(&conn, evo_id, gid);
-            offspring_count += 1;
+            // Keep survivors with their existing fitness (no re-evaluation needed).
+            for (genome, fitness) in survivors.iter().zip(survivor_fitnesses.iter()) {
+                if offspring_count >= per_island_pop { break; }
+                let bytes = bincode::serialize(genome).unwrap();
+                let conn = db.lock().unwrap();
+                insert_genotype_with_fitness(
+                    &conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
+                );
+                offspring_count += 1;
+            }
+
+            // Random injection every INJECTION_INTERVAL gens.
+            const INJECTION_INTERVAL: usize = 10;
+            const INJECTION_FRACTION: f64 = 0.10;
+            let inject_count = if next_gen > 0 && next_gen % INJECTION_INTERVAL == 0 {
+                (per_island_pop as f64 * INJECTION_FRACTION).round() as usize
+            } else {
+                0
+            };
+            for _ in 0..inject_count {
+                if offspring_count >= per_island_pop { break; }
+                let child = GenomeGraph::random(&mut rng);
+                let bytes = bincode::serialize(&child).unwrap();
+                let conn = db.lock().unwrap();
+                let gid = insert_genotype(
+                    &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                );
+                create_task(&conn, evo_id, gid);
+                offspring_count += 1;
+            }
+
+            // Fill remaining slots with offspring.
+            while offspring_count < per_island_pop {
+                let roll: f64 = rng.r#gen();
+                let child = if roll < config.asexual_ratio {
+                    let parent = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                    let mut child = parent.clone();
+                    karl_sims_core::mutation::mutate(&mut child, &mut rng);
+                    child
+                } else if roll < config.asexual_ratio + config.crossover_ratio {
+                    let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                    let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                    let mut child = karl_sims_core::mating::crossover(p1, p2, &mut rng);
+                    karl_sims_core::mutation::mutate(&mut child, &mut rng);
+                    child
+                } else {
+                    let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                    let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                    let mut child = karl_sims_core::mating::graft(p1, p2, &mut rng);
+                    karl_sims_core::mutation::mutate(&mut child, &mut rng);
+                    child
+                };
+
+                let bytes = bincode::serialize(&child).unwrap();
+                let conn = db.lock().unwrap();
+                let gid = insert_genotype(
+                    &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                );
+                create_task(&conn, evo_id, gid);
+                offspring_count += 1;
+            }
         }
     }
 

@@ -15,6 +15,8 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [maxParts, setMaxParts] = useState(20);
   const [gravity, setGravity] = useState(9.81);
   const [viscosity, setViscosity] = useState(2.0);
+  const [numIslands, setNumIslands] = useState(1);
+  const [migrationInterval, setMigrationInterval] = useState(20);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -29,6 +31,8 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       max_parts: maxParts,
       gravity: environment === "land" ? gravity : undefined,
       water_viscosity: environment === "water" ? viscosity : undefined,
+      num_islands: numIslands,
+      migration_interval: migrationInterval,
       name: name.trim() || undefined,
     });
     setCreating(false);
@@ -187,6 +191,42 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             </p>
           </div>
         )}
+
+        {/* Number of islands */}
+        <div>
+          <label className={labelClass}>Islands</label>
+          <input
+            type="number"
+            value={numIslands}
+            onChange={(e) => setNumIslands(Number(e.target.value))}
+            min={1}
+            max={12}
+            className={inputClass}
+          />
+          <p className="text-xs text-text-muted mt-1">
+            Parallel sub-populations for species diversity. 1 = single pool
+            (paper). With {numIslands} islands, each gets ~
+            {Math.max(1, Math.floor(popSize / numIslands))} creatures.
+          </p>
+        </div>
+
+        {/* Migration interval */}
+        <div>
+          <label className={labelClass}>Migration Interval (gens)</label>
+          <input
+            type="number"
+            value={migrationInterval}
+            onChange={(e) => setMigrationInterval(Number(e.target.value))}
+            min={0}
+            max={1000}
+            disabled={numIslands <= 1}
+            className={inputClass}
+          />
+          <p className="text-xs text-text-muted mt-1">
+            Best of each island moves to next island along a ring. 0 = full
+            isolation.
+          </p>
+        </div>
       </div>
 
       <div className="flex gap-3 mt-6">

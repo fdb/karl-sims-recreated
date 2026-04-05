@@ -36,6 +36,8 @@ struct CreateEvolutionRequest {
     max_parts: Option<usize>,
     gravity: Option<f64>,
     water_viscosity: Option<f64>,
+    num_islands: Option<usize>,
+    migration_interval: Option<usize>,
     name: Option<String>,
 }
 
@@ -58,6 +60,10 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/api/evolutions/{id}/best", axum::routing::get(get_best))
         .route(
+            "/api/evolutions/{id}/best_per_island",
+            axum::routing::get(get_best_per_island_handler),
+        )
+        .route(
             "/api/evolutions/{id}/stop",
             axum::routing::post(stop_evolution),
         )
@@ -72,6 +78,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/evolutions/{id}/stats",
             axum::routing::get(get_evolution_stats),
+        )
+        .route(
+            "/api/evolutions/{id}/island_stats",
+            axum::routing::get(get_island_stats_handler),
         )
         .route("/api/genotypes/{id}", axum::routing::get(get_genotype_info))
         .route(
@@ -123,6 +133,8 @@ async fn create_evolution(
         gravity: req.gravity.unwrap_or(9.81).clamp(0.0, 30.0),
         water_viscosity: req.water_viscosity.unwrap_or(2.0).clamp(0.1, 10.0),
         max_body_angular_velocity: Some(20.0),
+        num_islands: req.num_islands.unwrap_or(1).clamp(1, 12),
+        migration_interval: req.migration_interval.unwrap_or(20).clamp(0, 1000),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
@@ -192,7 +204,24 @@ async fn get_best(
     let best = db::get_best_genotypes(&conn, id, 10);
     Json(
         best.into_iter()
-            .map(|(gid, fitness, _bytes)| serde_json::json!({"id": gid, "fitness": fitness}))
+            .map(|(gid, fitness, _bytes, island_id)| {
+                serde_json::json!({"id": gid, "fitness": fitness, "island_id": island_id})
+            })
+            .collect(),
+    )
+}
+
+async fn get_best_per_island_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<Vec<serde_json::Value>> {
+    let conn = state.db.lock().unwrap();
+    let best = db::get_best_per_island(&conn, id);
+    Json(
+        best.into_iter()
+            .map(|(gid, fitness, island_id)| {
+                serde_json::json!({"id": gid, "fitness": fitness, "island_id": island_id})
+            })
             .collect(),
     )
 }
@@ -236,6 +265,27 @@ async fn get_evolution_stats(
             .map(|(generation, best, avg)| {
                 serde_json::json!({
                     "generation": generation,
+                    "best_fitness": best,
+                    "avg_fitness": avg,
+                })
+            })
+            .collect(),
+    )
+}
+
+async fn get_island_stats_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<Vec<serde_json::Value>> {
+    let conn = state.db.lock().unwrap();
+    let stats = db::get_island_stats(&conn, id);
+    Json(
+        stats
+            .into_iter()
+            .map(|(generation, island_id, best, avg)| {
+                serde_json::json!({
+                    "generation": generation,
+                    "island_id": island_id,
                     "best_fitness": best,
                     "avg_fitness": avg,
                 })

@@ -37,6 +37,27 @@ pub struct EvolutionParams {
     /// Water viscosity coefficient (only used for Water environment). Default: 2.0
     #[serde(default = "default_viscosity")]
     pub water_viscosity: f64,
+    /// Number of islands for the islands-model genetic algorithm. Each
+    /// island is an isolated sub-population with its own selection &
+    /// reproduction; best individuals migrate between islands every
+    /// `migration_interval` generations to keep gene flow alive.
+    ///
+    /// Sims 1994: single population.
+    /// Our variant: multi-island model to maintain species diversity over
+    /// long runs (see Whitley 1989, Cantú-Paz 2000).
+    /// `population_size` is split evenly across islands — so `num_islands=3`
+    /// with `population_size=150` gives 50 creatures per island.
+    /// Default: 1 (single pool, paper-faithful).
+    #[serde(default = "default_num_islands")]
+    pub num_islands: usize,
+    /// Generation interval at which the best creature of each island is
+    /// migrated to the next island in a ring topology. Set to 0 to disable
+    /// migration entirely (each island evolves in complete isolation).
+    ///
+    /// Sims 1994: n/a.
+    /// Default: 20 generations.
+    #[serde(default = "default_migration_interval")]
+    pub migration_interval: usize,
     /// Maximum plausible per-body angular velocity, in rad/s. A creature is
     /// rejected (fitness=0) if ANY body exceeds this rate at any frame.
     ///
@@ -56,6 +77,8 @@ pub struct EvolutionParams {
 fn default_gravity() -> f64 { 9.81 }
 fn default_viscosity() -> f64 { 2.0 }
 fn default_max_body_angular_velocity() -> Option<f64> { Some(20.0) }
+fn default_num_islands() -> usize { 1 }
+fn default_migration_interval() -> usize { 20 }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
@@ -73,6 +96,8 @@ impl Default for EvolutionParams {
             gravity: 9.81,
             water_viscosity: 2.0,
             max_body_angular_velocity: Some(20.0),
+            num_islands: 1,
+            migration_interval: 20,
         }
     }
 }
