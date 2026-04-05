@@ -1,6 +1,8 @@
 pub mod body;
 pub mod joint;
 pub mod world;
+#[cfg(feature = "rapier-physics")]
+pub mod rapier_world;
 pub mod scene;
 pub mod creature_def;
 pub mod spatial;
