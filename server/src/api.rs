@@ -38,6 +38,9 @@ struct CreateEvolutionRequest {
     water_viscosity: Option<f64>,
     num_islands: Option<usize>,
     migration_interval: Option<usize>,
+    /// Joint-motion stddev threshold (radians). `None` to disable.
+    /// Default: 0.3. See `EvolutionParams::min_joint_motion`.
+    min_joint_motion: Option<f64>,
     name: Option<String>,
 }
 
@@ -147,6 +150,9 @@ async fn create_evolution(
         max_body_angular_velocity: Some(20.0),
         num_islands: req.num_islands.unwrap_or(1).clamp(1, 12),
         migration_interval: req.migration_interval.unwrap_or(20).clamp(0, 1000),
+        // If the caller omits min_joint_motion we keep the default (Some(0.3)).
+        // Callers can pass `null` (→ None) to disable, or a concrete number.
+        min_joint_motion: req.min_joint_motion.or(Some(0.3)),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {

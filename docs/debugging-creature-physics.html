@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Debugging Creature Physics — Karl Sims Recreated</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --deep:#0a0a0f; --surface:#12121a; --card:#1a1a26; --elev:#22222e;
+    --b:#2a2a3a; --bb:#3a3a52;
+    --fg:#e8e8f0; --fg2:#9898b0; --fg3:#5e5e78;
+    --orange:#fb923c; --orange5:#f97316; --cyan:#22d3ee;
+    --green:#4ade80; --pink:#f472b6; --purple:#c084fc;
+    --yellow:#facc15; --red:#f87171;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'Outfit',system-ui,sans-serif;
+    background:var(--deep); color:var(--fg);
+    overflow:hidden;
+    background-image:
+      radial-gradient(ellipse 80% 60% at 50% 0%, rgba(251,146,60,.08), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 20% 100%, rgba(34,211,238,.05), transparent 60%),
+      linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
+    background-size:auto, auto, 40px 40px, 40px 40px;
+  }
+  code, .mono{font-family:'JetBrains Mono',monospace}
+
+  /* ── Slide engine ───────────────────────── */
+  .slides{position:fixed;inset:0}
+  .slide{
+    position:absolute; inset:0;
+    padding:72px 80px 120px;
+    opacity:0; pointer-events:none;
+    transition:opacity .4s ease, transform .4s ease;
+    display:flex; flex-direction:column;
+    overflow-y:auto;
+  }
+  .slide.active{opacity:1;pointer-events:auto;transform:translateX(0)}
+  .slide.enter-right{transform:translateX(40px)}
+  .slide.enter-left{transform:translateX(-40px)}
+
+  .hud{position:fixed;top:24px;left:32px;right:32px;display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg3);z-index:10;pointer-events:none}
+  .hud .section{color:var(--orange)}
+  .counter{font-variant-numeric:tabular-nums}
+
+  .nav-dots{position:fixed;bottom:28px;left:0;right:0;display:flex;justify-content:center;gap:6px;z-index:10;flex-wrap:wrap;padding:0 40px}
+  .nav-dot{width:8px;height:8px;border-radius:50%;background:var(--b);border:none;cursor:pointer;transition:all .2s}
+  .nav-dot:hover{background:var(--bb)}
+  .nav-dot.active{background:var(--orange);width:24px;border-radius:4px}
+  .nav-spacer{width:16px}
+
+  /* ── Headers ───────────────────────── */
+  h1{font-weight:300;font-size:56px;letter-spacing:-.02em;line-height:1.05;margin-bottom:20px}
+  h1 .accent{font-weight:600;color:var(--orange)}
+  h2{font-weight:500;font-size:32px;letter-spacing:-.01em;margin-bottom:8px}
+  h2 .accent{color:var(--cyan)}
+  .subtitle{color:var(--fg2);font-size:16px;margin-bottom:32px;max-width:720px;line-height:1.55}
+  .kicker{display:inline-block;padding:4px 12px;border-radius:999px;border:1px solid var(--bb);background:var(--elev);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:16px}
+
+  /* ── Cards / Grids ───────────────────────── */
+  .grid{display:grid;gap:20px}
+  .grid-2{grid-template-columns:repeat(2,1fr)}
+  .grid-3{grid-template-columns:repeat(3,1fr)}
+  .grid-4{grid-template-columns:repeat(4,1fr)}
+  @media (max-width:1100px){.grid-3,.grid-4{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:760px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+
+  .card{
+    background:var(--card);border:1px solid var(--b);border-radius:12px;
+    padding:20px 22px;transition:transform .2s, border-color .2s, box-shadow .2s;
+  }
+  .card:hover{transform:translateY(-2px);border-color:var(--bb);box-shadow:0 8px 24px rgba(251,146,60,.08)}
+  .card h3{font-weight:500;font-size:18px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+  .card p{color:var(--fg2);font-size:14px;line-height:1.55}
+  .card .num{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:500;color:var(--orange);display:block;margin-bottom:4px}
+  .card .num.cyan{color:var(--cyan)}
+  .card .num.green{color:var(--green)}
+  .card .num.red{color:var(--red)}
+
+  /* ── Code blocks ───────────────────────── */
+  .code-block{background:var(--surface);border:1px solid var(--b);border-radius:10px;overflow:hidden;font-family:'JetBrains Mono',monospace;font-size:13px}
+  .code-header{padding:10px 14px;background:var(--elev);border-bottom:1px solid var(--b);display:flex;align-items:center;gap:8px;font-size:11px;color:var(--fg2)}
+  .code-dot{width:10px;height:10px;border-radius:50%}
+  .code-dot.red{background:#ff5f57}.code-dot.yellow{background:#febc2e}.code-dot.green{background:#28c840}
+  .code-header > span:last-child{margin-left:8px;letter-spacing:.06em}
+  .code-body{padding:14px 18px;line-height:1.65;overflow-x:auto;color:var(--fg);white-space:pre;tab-size:2}
+  .code-body .kw{color:#c084fc}
+  .code-body .ty{color:#22d3ee}
+  .code-body .st{color:#4ade80}
+  .code-body .nb{color:#fb923c}
+  .code-body .cm{color:#5e5e78;font-style:italic}
+  .code-body .fn{color:#f472b6}
+  .code-body .pr{color:#facc15}
+
+  /* ── Tags & pills ───────────────────────── */
+  .tag{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;border:1px solid var(--b);background:var(--elev);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--fg2);margin-right:6px;margin-bottom:6px}
+  .tag .dot{width:6px;height:6px;border-radius:50%;background:var(--orange)}
+  .tag.cyan .dot{background:var(--cyan)}
+  .tag.green .dot{background:var(--green)}
+  .tag.purple .dot{background:var(--purple)}
+  .tag.pink .dot{background:var(--pink)}
+
+  /* ── Stagger ───────────────────────── */
+  .stagger > *{opacity:0;transform:translateY(10px);transition:opacity .4s ease, transform .4s ease}
+  .active .stagger > *{opacity:1;transform:translateY(0)}
+  .active .stagger > *:nth-child(1){transition-delay:.05s}
+  .active .stagger > *:nth-child(2){transition-delay:.12s}
+  .active .stagger > *:nth-child(3){transition-delay:.19s}
+  .active .stagger > *:nth-child(4){transition-delay:.26s}
+  .active .stagger > *:nth-child(5){transition-delay:.33s}
+  .active .stagger > *:nth-child(6){transition-delay:.40s}
+
+  /* ── Callouts ───────────────────────── */
+  .callout{border-left:3px solid var(--orange);padding:12px 16px;background:rgba(251,146,60,.05);border-radius:4px;color:var(--fg2);font-size:14px;line-height:1.55}
+  .callout.cyan{border-color:var(--cyan);background:rgba(34,211,238,.05)}
+  .callout.red{border-color:var(--red);background:rgba(248,113,113,.05)}
+  .callout.green{border-color:var(--green);background:rgba(74,222,128,.05)}
+  .callout strong{color:var(--fg)}
+  .callout .label{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);display:block;margin-bottom:6px}
+  .callout.cyan .label{color:var(--cyan)}
+  .callout.red .label{color:var(--red)}
+  .callout.green .label{color:var(--green)}
+
+  /* ── Plot container ───────────────────────── */
+  .chart{background:var(--surface);border:1px solid var(--b);border-radius:10px;padding:16px}
+  .chart h4{font-size:13px;font-weight:500;color:var(--fg2);margin-bottom:8px;font-family:'JetBrains Mono',monospace;letter-spacing:.04em}
+  .chart .subhead{font-size:11px;color:var(--fg3);margin-bottom:12px}
+
+  /* ── Mermaid theming ───────────────────────── */
+  .mermaid{background:var(--surface);border:1px solid var(--b);border-radius:10px;padding:20px;display:flex;justify-content:center}
+  .mermaid svg{max-width:100%;height:auto}
+
+  /* ── Phase strip ───────────────────────── */
+  .phase-strip{display:flex;gap:2px;border-radius:8px;overflow:hidden;margin:20px 0;font-family:'JetBrains Mono',monospace;font-size:11px}
+  .phase{flex:1;padding:12px 10px;text-align:center;background:var(--elev);border-top:3px solid transparent}
+  .phase .t{display:block;color:var(--fg3);font-size:10px;margin-bottom:4px}
+  .phase .name{color:var(--fg);font-weight:500}
+  .phase.fall{border-color:var(--cyan)}
+  .phase.lock{border-color:var(--orange)}
+  .phase.sliding{border-color:var(--red)}
+  .phase.flip{border-color:var(--yellow)}
+  .phase.rest{border-color:var(--fg3)}
+
+  /* ── Interactive toggle ───────────────────────── */
+  .toggle-row{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .toggle-btn{padding:6px 12px;background:var(--elev);border:1px solid var(--b);color:var(--fg2);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;transition:all .15s}
+  .toggle-btn:hover{border-color:var(--bb);color:var(--fg)}
+  .toggle-btn.active{background:var(--orange);border-color:var(--orange);color:#0a0a0f;font-weight:600}
+
+  /* ── Fix cards ───────────────────────── */
+  .fix-card{padding:16px 18px;background:var(--card);border:1px solid var(--b);border-radius:10px;transition:all .2s}
+  .fix-card:hover{border-color:var(--orange);background:var(--elev)}
+  .fix-card .rank{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--orange);letter-spacing:.1em;text-transform:uppercase}
+  .fix-card h4{font-size:16px;font-weight:500;margin:6px 0 8px}
+  .fix-card p{font-size:13px;color:var(--fg2);line-height:1.55}
+
+  /* ── Misc ───────────────────────── */
+  .tech-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+  .hint{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--fg3);letter-spacing:.12em;text-transform:uppercase;margin-top:28px}
+  .hint kbd{display:inline-block;padding:2px 6px;background:var(--elev);border:1px solid var(--b);border-radius:4px;color:var(--fg2);margin:0 2px}
+  table.steps{width:100%;border-collapse:collapse;font-size:13px}
+  table.steps td{padding:10px 14px;border-bottom:1px solid var(--b);vertical-align:top}
+  table.steps tr:last-child td{border-bottom:none}
+  table.steps td:first-child{width:28px;color:var(--orange);font-family:'JetBrains Mono',monospace;font-weight:600}
+  table.steps code{background:var(--elev);padding:2px 6px;border-radius:4px;color:var(--cyan);font-size:12px}
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <span class="counter" id="counter">01 / 08</span>
+  <span class="section" id="section-label">intro</span>
+</div>
+
+<div class="slides" id="slides">
+
+  <!-- ═══ SLIDE 1: Title ═══ -->
+  <section class="slide active" data-section="intro">
+    <div class="kicker">debugging walkthrough · 2026-04-05</div>
+    <h1>When a creature <span class="accent">slides</span> without moving</h1>
+    <p class="subtitle">
+      Evolution 45, creature 794863: two rigid bodies connected by one revolute joint,
+      rewarded for locomotion. It travels <strong style="color:var(--orange)">25 metres in 10 seconds</strong>
+      — yet in the viewer its limbs barely flex. This is the story of how to figure out
+      why, using only the data already in the simulator.
+    </p>
+
+    <div class="grid grid-4" style="margin-top:12px" id="hero-stats">
+      <div class="card"><span class="num">25.07 m</span><p>total displacement along Z</p></div>
+      <div class="card"><span class="num cyan">2 bodies</span><p>root + one revolute child</p></div>
+      <div class="card"><span class="num green">600</span><p>frames @ 60 Hz (10 s sim)</p></div>
+      <div class="card"><span class="num red">7.2 s</span><p>joint angle <em>didn't change</em></p></div>
+    </div>
+
+    <div class="tech-badges">
+      <span class="tag"><span class="dot"></span>Rust · cargo</span>
+      <span class="tag cyan"><span class="dot"></span>Rapier3D PGS solver</span>
+      <span class="tag green"><span class="dot"></span>SQLite genome store</span>
+      <span class="tag purple"><span class="dot"></span>bincode genomes</span>
+    </div>
+
+    <div class="hint"><kbd>→</kbd> <kbd>←</kbd> navigate · <kbd>space</kbd> next · swipe on touch</div>
+  </section>
+
+  <!-- ═══ SLIDE 2: The mystery ═══ -->
+  <section class="slide" data-section="intro">
+    <div class="kicker">the anomaly</div>
+    <h2>Two boxes, <span class="accent">one joint</span>, no visible gait</h2>
+    <p class="subtitle">
+      The phenotype is tiny. Bodies are 0.21×0.33×0.80 m and 0.81×0.38×0.50 m.
+      They're connected by a single revolute joint with limits [−0.82, +1.06] rad.
+      On the fitness ledger this creature scored well on <code>SwimmingSpeed</code> in a
+      <code>Land</code> environment. Visually, it glides across the checkerboard floor like
+      a hockey puck — same pose, same angle, just… moving.
+    </p>
+
+    <div class="grid grid-2 stagger">
+      <div class="card">
+        <h3>⚠ What we expect</h3>
+        <p>Karl Sims–style locomotion requires <strong>cyclic actuation</strong>.
+        Limbs bend, push off the ground, return. The root body should advance
+        because some segment is periodically pressing against the floor.</p>
+      </div>
+      <div class="card">
+        <h3>🧩 What we see</h3>
+        <p>A static pose sliding at up to <strong>6 m/s</strong>. No visible wiggling,
+        no gait cycle. The joint appears frozen. This can't be normal
+        friction-driven walking — something else is producing horizontal force.</p>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:24px">
+      <span class="label">hypothesis list</span>
+      Candidates before looking at data:
+      <strong>(a)</strong> the fitness metric rewards something that isn't locomotion;
+      <strong>(b)</strong> a joint-constraint artefact in the PGS solver produces
+      phantom forces; <strong>(c)</strong> micro-oscillations below the frame sample rate
+      pump the body forward; <strong>(d)</strong> ground friction + a biased contact
+      geometry creates drift.
+    </div>
+  </section>
+
+  <!-- ═══ SLIDE 3: Investigation toolkit ═══ -->
+  <section class="slide" data-section="toolkit">
+    <div class="kicker">step 1 · reach for the CLI</div>
+    <h2>The <span class="accent">debug binary</span> already exists</h2>
+    <p class="subtitle">
+      <code>karl-sims-debug</code> loads a genome straight from the SQLite file, runs the
+      identical physics the fitness evaluator runs, and emits a per-frame JSON trace.
+      You don't need to boot the server or the viewer to investigate a creature — the
+      deterministic physics means the CLI produces bit-identical output.
+    </p>
+
+    <div class="code-block stagger">
+      <div class="code-header">
+        <span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span>
+        <span>bash — reproduce creature 794863 locally</span>
+      </div>
+      <div class="code-body"><span class="cm"># 1. Build the debug bin once (release mode — fitness is release-timed)</span>
+<span class="pr">$</span> cargo build --release --bin karl-sims-debug
+
+<span class="cm"># 2. Run the simulation, dump a trace</span>
+<span class="pr">$</span> ./target/release/karl-sims-debug \
+      --evolution 45 --creature 794863 \
+      --verbose --output /tmp/trace-794863.json
+
+<span class="cm"># stderr: evaluates params, simulates 600 frames (10 s @ 60 Hz),</span>
+<span class="cm"># prints root position every second, summarizes drift + NaN frames.</span>
+<span class="cm"># stdout: — (the JSON goes to the --output path)</span></div>
+    </div>
+
+    <table class="steps" style="margin-top:24px">
+      <tr><td>1</td><td>Reads <code>genotypes.genome_bytes</code> by ID, deserializes via <code>bincode</code> into a <code>GenomeGraph</code></td></tr>
+      <tr><td>2</td><td>Reads <code>evolutions.config_json</code>, parses <code>EvolutionParams</code> (environment, gravity, sim_duration)</td></tr>
+      <tr><td>3</td><td>Applies identical environment setup as <code>evaluate_fitness</code>: gravity, ground plane, root at y=2</td></tr>
+      <tr><td>4</td><td>Steps Rapier at 60 Hz for <code>sim_duration</code> seconds, collecting per-frame body transforms</td></tr>
+      <tr><td>5</td><td>Writes JSON: one frame per entry, each frame has all body positions + quaternions + half-extents</td></tr>
+    </table>
+  </section>
+
+  <!-- ═══ SLIDE 4: Trace schema ═══ -->
+  <section class="slide" data-section="toolkit">
+    <div class="kicker">step 2 · read the trace</div>
+    <h2>The JSON schema is <span class="accent">flat and small</span></h2>
+    <p class="subtitle">
+      601 frames, two bodies each, ~18 KB. Small enough that a Python one-liner can
+      scan for anomalies. The key fields are <code>px/py/pz</code> (world position) and
+      <code>qw/qx/qy/qz</code> (orientation) — those are enough to see what the body is doing.
+    </p>
+
+    <div class="grid grid-2">
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span>
+          <span>trace-794863.json (excerpt)</span>
+        </div>
+        <div class="code-body">{
+  <span class="st">"evolution_id"</span>: <span class="nb">45</span>,
+  <span class="st">"creature_id"</span>: <span class="nb">794863</span>,
+  <span class="st">"body_count"</span>: <span class="nb">2</span>,
+  <span class="st">"total_frames"</span>: <span class="nb">601</span>,
+  <span class="st">"dt"</span>: <span class="nb">0.01666...</span>,
+  <span class="st">"first_nan_frame"</span>: <span class="kw">null</span>,
+  <span class="st">"displacement"</span>: <span class="nb">25.065</span>,
+  <span class="st">"integrator"</span>: <span class="st">"rapier"</span>,
+  <span class="st">"environment"</span>: <span class="st">"Land"</span>,
+  <span class="st">"frames"</span>: [
+    {
+      <span class="st">"frame"</span>: <span class="nb">0</span>,
+      <span class="st">"bodies"</span>: [
+        { <span class="st">"px"</span>:<span class="nb">0</span>, <span class="st">"py"</span>:<span class="nb">2.0</span>, <span class="st">"pz"</span>:<span class="nb">0</span>,
+          <span class="st">"qw"</span>:<span class="nb">1</span>, <span class="st">"qx"</span>:<span class="nb">0</span>, <span class="st">"qy"</span>:<span class="nb">0</span>, <span class="st">"qz"</span>:<span class="nb">0</span>, ... },
+        { <span class="st">"px"</span>:<span class="nb">0</span>, <span class="st">"py"</span>:<span class="nb">2.0</span>, <span class="st">"pz"</span>:<span class="nb">0.29</span>, ... }
+      ]
+    },
+    ...
+  ]
+}</div>
+      </div>
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span>
+          <span>python — anomaly probe</span>
+        </div>
+        <div class="code-body"><span class="kw">import</span> json
+t = json.load(<span class="fn">open</span>(<span class="st">'/tmp/trace-794863.json'</span>))
+
+<span class="cm"># Is the joint actually moving?</span>
+qxs = [f[<span class="st">'bodies'</span>][<span class="nb">1</span>][<span class="st">'qx'</span>] <span class="kw">for</span> f <span class="kw">in</span> t[<span class="st">'frames'</span>]]
+<span class="kw">for</span> sec <span class="kw">in</span> <span class="fn">range</span>(<span class="nb">10</span>):
+    w = qxs[sec*<span class="nb">60</span>:(sec+<span class="nb">1</span>)*<span class="nb">60</span>]
+    <span class="fn">print</span>(<span class="st">f'</span>t={sec}-{sec+<span class="nb">1</span>}s: range={<span class="fn">max</span>(w)-<span class="fn">min</span>(w):.<span class="nb">4</span>f}<span class="st">'</span>)
+
+<span class="cm">#  t=0-1s: range=0.5414   ← falling + bending</span>
+<span class="cm">#  t=1-2s: range=0.0056   ← frozen</span>
+<span class="cm">#  t=2-3s: range=0.0000   ← frozen</span>
+<span class="cm">#  t=3-4s: range=0.0000   ← frozen</span>
+<span class="cm">#  t=4-5s: range=0.0000   ← still frozen</span>
+<span class="cm">#  t=5-6s: range=0.0000   ← still frozen</span>
+<span class="cm">#  t=8-9s: range=0.9390   ← finally flips</span></div>
+      </div>
+    </div>
+
+    <div class="callout cyan" style="margin-top:20px">
+      <span class="label">what this tells us</span>
+      The child body's orientation quaternion (specifically <code>qx</code>, which
+      corresponds to rotation about the revolute axis) has <strong>zero variation across five
+      full seconds</strong>. If the joint were oscillating — even at 100 Hz below our sample
+      rate — we'd see jitter in the noise floor. We don't. The joint is <em>mechanically
+      locked</em>.
+    </div>
+  </section>
+
+  <!-- ═══ SLIDE 5: The smoking gun chart ═══ -->
+  <section class="slide" data-section="analysis">
+    <div class="kicker">step 3 · plot it</div>
+    <h2>The smoking gun: <span class="accent">position moves, angle doesn't</span></h2>
+    <p class="subtitle">
+      Two plots, same time axis. Root Z-position accelerates from 0 to −25 m. Joint
+      angle (derived from the child's quaternion) locks at −1.14 rad from t≈0.7 s and
+      holds for over 7 seconds. <strong>Locomotion without articulation.</strong>
+    </p>
+
+    <div class="phase-strip">
+      <div class="phase fall"><span class="t">0.0–0.6 s</span><span class="name">FALL</span></div>
+      <div class="phase lock"><span class="t">0.7–0.9 s</span><span class="name">LOCK</span></div>
+      <div class="phase sliding"><span class="t">1.0–7.9 s</span><span class="name">SLIDE (7.0 s)</span></div>
+      <div class="phase flip"><span class="t">8.0–8.3 s</span><span class="name">FLIP</span></div>
+      <div class="phase rest"><span class="t">8.4–10 s</span><span class="name">REST</span></div>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="chart">
+        <h4>root position z (m)</h4>
+        <div class="subhead">distance along the sliding axis · sampled every 2 frames</div>
+        <div id="chart-pos"></div>
+      </div>
+      <div class="chart">
+        <h4>joint angle (rad) — from child qx</h4>
+        <div class="subhead">zero means straight · ±limit means at constraint stop</div>
+        <div id="chart-angle"></div>
+      </div>
+    </div>
+
+    <div class="callout red" style="margin-top:20px">
+      <span class="label">observation</span>
+      During the entire SLIDE phase (t=1 to t=8) the joint angle is pinned at <strong>−1.14 rad</strong>
+      — right at the negative joint limit. Yet the body accelerates from rest to roughly
+      6 m/s, then asymptotes. Net horizontal force is present and sustained. Where is it coming from?
+    </div>
+  </section>
+
+  <!-- ═══ SLIDE 6: The genome ═══ -->
+  <section class="slide" data-section="analysis">
+    <div class="kicker">step 4 · inspect the brain</div>
+    <h2>The actuator is a <span class="accent">very slow sine wave</span></h2>
+    <p class="subtitle">
+      Deserialize the genome and print its brain nodes. Node 1 has one neuron, one
+      effector. The neuron is an <code>OscillateWave</code> with tiny frequency and a small
+      weight — so tiny that over the 10-second simulation, the sine barely completes one cycle.
+    </p>
+
+    <div class="grid grid-2">
+      <div>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span>
+            <span>genome · node 1 brain</span>
+          </div>
+          <div class="code-body"><span class="ty">OscillateWave</span> {
+  inputs: [
+    (<span class="ty">Constant</span>(<span class="nb">1.0237</span>), weight <span class="nb">0.6319</span>),  <span class="cm">// freq</span>
+    (<span class="ty">Constant</span>(<span class="nb">4.5407</span>), weight <span class="nb">0.1223</span>),  <span class="cm">// phase</span>
+  ]
+}
+<span class="cm">// effective freq = 1.0237 · 0.6319 = 0.647 rad/s</span>
+<span class="cm">// period = 2π/0.647 ≈ 9.71 s  ←  barely one cycle in 10 s sim</span>
+
+<span class="ty">Effector</span> {
+  input: <span class="ty">Neuron</span>(<span class="nb">0</span>),
+  weight: <span class="nb">0.2017</span>       <span class="cm">// tiny · output ∈ [-0.20, +0.20]</span>
+}</div>
+        </div>
+        <div class="callout" style="margin-top:16px">
+          <span class="label">sub-signal</span>
+          Output of the effector over 10 s: <code>sin(t·0.647 + 0.555) · 0.2017</code>.
+          That's a slowly varying signal between −0.20 and +0.20, <strong>never zero-crossing
+          during the fast SLIDE phase</strong> — the torque direction never flips, so the
+          joint stays pressed against the same limit.
+        </div>
+      </div>
+
+      <div class="chart">
+        <h4>effector output · 10 s window</h4>
+        <div class="subhead">slow sine — stays positive-signed for ~7 s, flips once near t=8</div>
+        <div id="chart-osc"></div>
+      </div>
+    </div>
+
+    <div class="callout cyan" style="margin-top:20px">
+      <span class="label">the deception</span>
+      The creature <em>does</em> have a periodic brain — but evolution tuned the frequency so
+      low that within the fitness-evaluation window, the sine effectively behaves as a
+      constant. What looks like an oscillator on paper acts as a <strong>DC bias</strong> in practice.
+    </div>
+  </section>
+
+  <!-- ═══ SLIDE 7: Mechanism diagram ═══ -->
+  <section class="slide" data-section="mechanism">
+    <div class="kicker">step 5 · the mechanism</div>
+    <h2>How a <span class="accent">static torque</span> pushes the body sideways</h2>
+    <p class="subtitle">
+      A pure torque couple on a free body produces rotation, not translation. But once
+      the joint hits its limit and the child's bottom face contacts the ground,
+      the torque's reaction forces get channeled through the contact point — and a
+      horizontal component leaks out through the ground-friction coupling.
+    </p>
+
+    <div class="mermaid">
+graph LR
+  A["Brain neuron<br/>sin·0.2 ≈ +0.2 const"] --> B["Effector applies<br/>τ = +1.95 N·m"]
+  B --> C["Joint limit<br/>already at +1.06 rad"]
+  C --> D{"Torque can't<br/>rotate further"}
+  D --> E["Becomes a static<br/>constraint force"]
+  E --> F["Couples to ground<br/>contact point"]
+  F --> G["PGS solver distributes<br/>impulse across normal<br/>+ friction axes"]
+  G --> H["Horizontal component<br/>survives → body drifts"]
+  H --> I["linear_damping=0.3<br/>caps terminal velocity<br/>at ~6 m/s"]
+
+  style A fill:#1a1a26,stroke:#fb923c,color:#e8e8f0
+  style H fill:#1a1a26,stroke:#f87171,color:#e8e8f0
+  style I fill:#1a1a26,stroke:#4ade80,color:#e8e8f0
+    </div>
+
+    <div class="grid grid-3 stagger" style="margin-top:20px">
+      <div class="card">
+        <h3><span style="color:var(--orange)">●</span> What evolution found</h3>
+        <p>A brain that keeps the joint pinned on one side. The small sine weight (0.2)
+        and slow frequency (~0.6 rad/s) makes this effectively a DC torque within
+        the fitness window.</p>
+      </div>
+      <div class="card">
+        <h3><span style="color:var(--cyan)">●</span> Why it translates</h3>
+        <p>The joint limit converts a rotational command into static pressure against
+        the parent. That structural load passes through the contact point and, because
+        of the parent's tilt, has a non-vertical component.</p>
+      </div>
+      <div class="card">
+        <h3><span style="color:var(--red)">●</span> Why it's an exploit</h3>
+        <p>This isn't locomotion — it's a <strong>ground-contact-meets-joint-limit solver
+        quirk</strong> that produces drift without doing the mechanical work of walking.
+        Fitness rewards displacement, so evolution finds it.</p>
+      </div>
+    </div>
+
+    <div class="callout green" style="margin-top:20px">
+      <span class="label">why it stops at t=8 s</span>
+      Look at the oscillator output chart. At ~t=7.8 s the sine <em>finally</em> crosses zero
+      and the torque direction flips. The joint releases from its negative limit and
+      swings across to its positive limit. But the new configuration's horizontal-force
+      component points <em>opposite</em> the drift — net force drops to near zero, and the
+      creature comes to rest. The trace confirms: rz only changes by 7 cm from t=8 s to t=10 s.
+    </div>
+  </section>
+
+  <!-- ═══ SLIDE 8: Root cause & fixes ═══ -->
+  <section class="slide" data-section="conclusion">
+    <div class="kicker">step 6 · what to do about it</div>
+    <h2><span class="accent">Root cause</span> &amp; candidate fixes</h2>
+    <p class="subtitle">
+      Yes — we found the root cause. The fitness function rewards root displacement,
+      and the physics allows a constant-torque-against-a-joint-limit strategy to
+      produce displacement without gait. Below are four candidate fixes, from most
+      targeted (selection pressure) to most invasive (physics changes, which
+      CLAUDE.md says we must avoid without approval).
+    </p>
+
+    <div class="toggle-row">
+      <button class="toggle-btn active" data-fix="all">All</button>
+      <button class="toggle-btn" data-fix="fitness">Fitness</button>
+      <button class="toggle-btn" data-fix="brain">Brain</button>
+      <button class="toggle-btn" data-fix="physics">Physics</button>
+    </div>
+
+    <div class="grid grid-2 stagger" id="fix-grid">
+      <div class="fix-card" data-cat="fitness">
+        <div class="rank">fix #1 · fitness · easiest · highest leverage</div>
+        <h4>Require joint-angle variance</h4>
+        <p>Multiply the speed score by a <strong>motion coefficient</strong>:
+        <code>clamp(mean_joint_stddev / threshold, 0, 1)</code>. A creature whose
+        joints never change angle gets score=0. Legitimate walkers are unaffected
+        because they already cycle their joints.
+        <strong style="color:var(--orange)">No paper divergence</strong> — Sims-1994 creatures
+        all exhibit cyclic gaits, so this just formalizes what's already implied.</p>
+      </div>
+      <div class="fix-card" data-cat="brain">
+        <div class="rank">fix #2 · brain · moderate</div>
+        <h4>Clamp slow oscillator frequencies</h4>
+        <p>Currently <code>OscillateWave</code> accepts any frequency input. A creature
+        with a 0.1 Hz sine wave is functionally a DC brain within a 10 s eval. Enforce
+        a minimum effective frequency (e.g., ≥ 1 Hz) on <code>OscillateWave</code>, or add
+        a mutation bias that pulls freq toward the middle of a biologically plausible
+        range (1–5 Hz).</p>
+      </div>
+      <div class="fix-card" data-cat="brain">
+        <div class="rank">fix #3 · brain · surgical</div>
+        <h4>Zero torque when joint is at limit</h4>
+        <p>In <code>apply_effectors</code>, skip writing torque for a DOF when
+        <code>joint.angles[dof]</code> is already beyond the limit in the direction the
+        torque would push. This removes the "lean forever" strategy at the source
+        — a static torque against a limit stops being free. Doesn't affect cyclic
+        actuators, which oscillate through the midrange.</p>
+      </div>
+      <div class="fix-card" data-cat="physics">
+        <div class="rank">fix #4 · physics · REQUIRES APPROVAL</div>
+        <p style="font-size:11px;color:var(--red);margin-bottom:8px">CLAUDE.md: "Do NOT modify physics code"</p>
+        <h4>Increase linear damping on land</h4>
+        <p>Current <code>lin_damp=0.3</code> gives a 6 m/s terminal velocity under a 0.2 N·m
+        leaked horizontal force. Raising to 1.5 would cut terminal drift to ~1.2 m/s,
+        drastically reducing fitness reward for the exploit. But this is in
+        <code>rapier_world.rs</code> — surface to user before touching.</p>
+      </div>
+    </div>
+
+    <div class="callout green" style="margin-top:20px">
+      <span class="label">recommendation</span>
+      Start with <strong>Fix #1 (joint-variance fitness coefficient)</strong>. It's the
+      cheapest to implement, safest to revert, and directly targets the selection
+      pressure that rewards static-pose sliders. If post-fix evolution still
+      produces low-variance winners, layer Fix #3 on top. Keep Fix #4 in reserve
+      pending approval — physics changes need TDD tests per the project rules.
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-dots" id="nav-dots"></div>
+
+<script type="module">
+  import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
+  import mermaid from 'https://esm.sh/mermaid@11';
+
+  mermaid.initialize({
+    startOnLoad:true, theme:'dark', fontFamily:'JetBrains Mono, monospace',
+    themeVariables:{
+      primaryColor:'#1a1a26', primaryBorderColor:'#3a3a52', primaryTextColor:'#e8e8f0',
+      lineColor:'#fb923c', secondaryColor:'#22222e', tertiaryColor:'#12121a',
+      mainBkg:'#1a1a26', clusterBkg:'#12121a'
+    }
+  });
+
+  // ── Real trace data from /tmp/trace-794863.json (sampled every 2 frames = 30 Hz) ──
+  const TRACE = [{"t":0.0,"rz":0.0,"ry":2.0,"ja":0.0,"cqx":0.0},{"t":0.0333,"rz":-0.0,"ry":1.9947,"ja":-0.0132,"cqx":-0.0066},{"t":0.0667,"rz":-0.0,"ry":1.979,"ja":-0.0526,"cqx":-0.0263},{"t":0.1,"rz":-0.0001,"ry":1.9531,"ja":-0.1189,"cqx":-0.0594},{"t":0.1333,"rz":-0.0004,"ry":1.917,"ja":-0.2129,"cqx":-0.1063},{"t":0.1667,"rz":-0.0011,"ry":1.8708,"ja":-0.3353,"cqx":-0.1669},{"t":0.2,"rz":-0.0023,"ry":1.8146,"ja":-0.4863,"cqx":-0.2407},{"t":0.2333,"rz":-0.0042,"ry":1.7484,"ja":-0.6659,"cqx":-0.3268},{"t":0.2667,"rz":-0.007,"ry":1.6721,"ja":-0.8737,"cqx":-0.4231},{"t":0.3,"rz":-0.0106,"ry":1.5855,"ja":-1.0953,"cqx":-0.5207},{"t":0.3333,"rz":-0.0106,"ry":1.4866,"ja":-1.095,"cqx":-0.5205},{"t":0.3667,"rz":-0.0106,"ry":1.3779,"ja":-1.0947,"cqx":-0.5204},{"t":0.4,"rz":-0.0106,"ry":1.2594,"ja":-1.0944,"cqx":-0.5203},{"t":0.4333,"rz":-0.0106,"ry":1.1313,"ja":-1.0941,"cqx":-0.5202},{"t":0.4667,"rz":-0.0106,"ry":0.9936,"ja":-1.0939,"cqx":-0.5201},{"t":0.5,"rz":-0.0106,"ry":0.8464,"ja":-1.0936,"cqx":-0.52},{"t":0.5333,"rz":-0.0106,"ry":0.6898,"ja":-1.0933,"cqx":-0.5198},{"t":0.5667,"rz":-0.0106,"ry":0.5239,"ja":-1.0931,"cqx":-0.5197},{"t":0.6,"rz":-0.0106,"ry":0.3489,"ja":-1.0928,"cqx":-0.5196},{"t":0.6333,"rz":-0.0116,"ry":0.1944,"ja":-1.1308,"cqx":-0.5358},{"t":0.6667,"rz":-0.006,"ry":0.2046,"ja":-1.109,"cqx":-0.5265},{"t":0.7,"rz":-0.0044,"ry":0.2088,"ja":-1.099,"cqx":-0.5223},{"t":0.7333,"rz":-0.0062,"ry":0.2066,"ja":-1.1077,"cqx":-0.526},{"t":0.7667,"rz":-0.0113,"ry":0.1982,"ja":-1.1325,"cqx":-0.5364},{"t":0.8,"rz":-0.0135,"ry":0.1969,"ja":-1.1385,"cqx":-0.539},{"t":0.8333,"rz":-0.0167,"ry":0.1972,"ja":-1.1391,"cqx":-0.5392},{"t":0.8667,"rz":-0.022,"ry":0.1975,"ja":-1.1399,"cqx":-0.5396},{"t":0.9,"rz":-0.0293,"ry":0.1977,"ja":-1.1401,"cqx":-0.5397},{"t":0.9333,"rz":-0.0375,"ry":0.1977,"ja":-1.1403,"cqx":-0.5398},{"t":0.9667,"rz":-0.0472,"ry":0.1977,"ja":-1.1403,"cqx":-0.5398},{"t":1.0,"rz":-0.0586,"ry":0.1977,"ja":-1.1403,"cqx":-0.5398},{"t":1.5,"rz":-0.4171,"ry":0.1977,"ja":-1.1404,"cqx":-0.5398},{"t":2.0,"rz":-1.1729,"ry":0.1977,"ja":-1.1404,"cqx":-0.5398},{"t":2.5,"rz":-2.3645,"ry":0.1977,"ja":-1.1405,"cqx":-0.5398},{"t":3.0,"rz":-3.8966,"ry":0.1977,"ja":-1.1405,"cqx":-0.5398},{"t":3.5,"rz":-5.7239,"ry":0.1977,"ja":-1.1405,"cqx":-0.5398},{"t":4.0,"rz":-7.8072,"ry":0.1977,"ja":-1.1405,"cqx":-0.5398},{"t":4.5,"rz":-10.1117,"ry":0.1977,"ja":-1.1405,"cqx":-0.5398},{"t":5.0,"rz":-12.6057,"ry":0.1977,"ja":-1.1405,"cqx":-0.5398},{"t":5.5,"rz":-15.2608,"ry":0.1977,"ja":-1.1405,"cqx":-0.5398},{"t":6.0,"rz":-18.0524,"ry":0.1977,"ja":-1.1404,"cqx":-0.5398},{"t":6.5,"rz":-20.9595,"ry":0.1977,"ja":-1.1404,"cqx":-0.5398},{"t":7.0,"rz":-23.4568,"ry":0.1977,"ja":-1.1404,"cqx":-0.5398},{"t":7.5,"rz":-24.7845,"ry":0.1977,"ja":-1.1404,"cqx":-0.5398},{"t":7.7667,"rz":-25.0658,"ry":0.197,"ja":-1.1414,"cqx":-0.5402},{"t":7.8,"rz":-25.082,"ry":0.1968,"ja":-1.1406,"cqx":-0.5399},{"t":7.8333,"rz":-25.0928,"ry":0.1966,"ja":-1.1403,"cqx":-0.5397},{"t":7.8667,"rz":-25.0961,"ry":0.1964,"ja":-1.14,"cqx":-0.5396},{"t":7.9,"rz":-25.0961,"ry":0.1962,"ja":-1.1399,"cqx":-0.5396},{"t":7.9333,"rz":-25.096,"ry":0.1961,"ja":-1.1394,"cqx":-0.5394},{"t":7.9667,"rz":-25.096,"ry":0.196,"ja":-1.1393,"cqx":-0.5393},{"t":8.0,"rz":-25.0958,"ry":0.196,"ja":-1.1354,"cqx":-0.5377},{"t":8.0333,"rz":-25.0945,"ry":0.1958,"ja":-1.1099,"cqx":-0.5269},{"t":8.0667,"rz":-25.092,"ry":0.1952,"ja":-1.0601,"cqx":-0.5056},{"t":8.1,"rz":-25.0882,"ry":0.1937,"ja":-0.9861,"cqx":-0.4733},{"t":8.1333,"rz":-25.0833,"ry":0.1908,"ja":-0.8867,"cqx":-0.429},{"t":8.1667,"rz":-25.0775,"ry":0.1854,"ja":-0.761,"cqx":-0.3714},{"t":8.2,"rz":-25.0711,"ry":0.1766,"ja":-0.6072,"cqx":-0.2989},{"t":8.2333,"rz":-25.0653,"ry":0.1647,"ja":-0.4321,"cqx":-0.2144},{"t":8.2667,"rz":-25.0652,"ry":0.1646,"ja":-0.2676,"cqx":-0.1334},{"t":8.3,"rz":-25.0652,"ry":0.1645,"ja":-0.0866,"cqx":-0.0433},{"t":8.3333,"rz":-25.0652,"ry":0.1645,"ja":0.11,"cqx":0.055},{"t":8.3667,"rz":-25.0652,"ry":0.1644,"ja":0.3213,"cqx":0.16},{"t":8.4,"rz":-25.0651,"ry":0.1643,"ja":0.5465,"cqx":0.2698},{"t":8.4333,"rz":-25.0651,"ry":0.1643,"ja":0.7847,"cqx":0.3824},{"t":8.4667,"rz":-25.0627,"ry":0.1649,"ja":0.8238,"cqx":0.4004},{"t":8.5,"rz":-25.0603,"ry":0.1649,"ja":0.8226,"cqx":0.3998},{"t":9.0,"rz":-25.0242,"ry":0.1653,"ja":0.8237,"cqx":0.4003},{"t":9.5,"rz":-25.0001,"ry":0.1653,"ja":0.8246,"cqx":0.4007},{"t":10.0,"rz":-24.9972,"ry":0.1643,"ja":-0.1644,"cqx":-0.0821}];
+
+  // Build oscillator series
+  const OSC = [];
+  for (let i=0;i<=600;i++){
+    const t = i/60;
+    // effective freq ~ 0.647, phase ~ 0.555, effector weight 0.2017
+    const v = Math.sin(t*0.647 + 0.555) * 0.2017;
+    OSC.push({t, v});
+  }
+
+  // Chart styling shared
+  const chartStyle = {
+    background:'transparent', color:'#e8e8f0',
+    fontFamily:'JetBrains Mono, monospace', fontSize:11
+  };
+
+  // ── Position chart ──
+  const posPlot = Plot.plot({
+    style: chartStyle,
+    width: 520, height: 280,
+    marginLeft: 48, marginBottom: 36,
+    x: {label: 't (s) →', grid: true, ticks: 5, domain:[0,10]},
+    y: {label: '↑ root.z (m)', grid: true, ticks: 6},
+    marks: [
+      Plot.ruleY([0], {stroke:'#3a3a52', strokeDasharray:'2,4'}),
+      // Phase bands
+      Plot.rect([{x1:0, x2:0.7, y1:-26, y2:1}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(34,211,238,0.08)'}),
+      Plot.rect([{x1:0.7, x2:1.0, y1:-26, y2:1}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(251,146,60,0.08)'}),
+      Plot.rect([{x1:1.0, x2:8.0, y1:-26, y2:1}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(248,113,113,0.08)'}),
+      Plot.rect([{x1:8.0, x2:8.4, y1:-26, y2:1}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(250,204,21,0.08)'}),
+      Plot.line(TRACE, {x:'t', y:'rz', stroke:'#fb923c', strokeWidth:2}),
+      Plot.dot(TRACE.filter((_,i)=>i%4===0), {x:'t', y:'rz', fill:'#fb923c', r:1.5})
+    ]
+  });
+  document.getElementById('chart-pos').append(posPlot);
+
+  // ── Joint angle chart ──
+  const anglePlot = Plot.plot({
+    style: chartStyle,
+    width: 520, height: 280,
+    marginLeft: 48, marginBottom: 36,
+    x: {label: 't (s) →', grid: true, ticks: 5, domain:[0,10]},
+    y: {label: '↑ joint angle (rad)', grid: true, ticks: 6, domain:[-1.3, 1.3]},
+    marks: [
+      Plot.ruleY([0], {stroke:'#3a3a52', strokeDasharray:'2,4'}),
+      Plot.ruleY([-1.14, 1.06], {stroke:'#f87171', strokeDasharray:'3,3', strokeOpacity:0.5}),
+      Plot.rect([{x1:0, x2:0.7, y1:-1.3, y2:1.3}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(34,211,238,0.08)'}),
+      Plot.rect([{x1:0.7, x2:1.0, y1:-1.3, y2:1.3}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(251,146,60,0.08)'}),
+      Plot.rect([{x1:1.0, x2:8.0, y1:-1.3, y2:1.3}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(248,113,113,0.08)'}),
+      Plot.rect([{x1:8.0, x2:8.4, y1:-1.3, y2:1.3}], {x1:'x1',x2:'x2',y1:'y1',y2:'y2', fill:'rgba(250,204,21,0.08)'}),
+      Plot.line(TRACE, {x:'t', y:'ja', stroke:'#22d3ee', strokeWidth:2}),
+      Plot.text([{t:9, y:-1.14, label:'neg limit'}], {x:'t', y:'y', text:'label', fill:'#f87171', fontSize:9, dy:-6}),
+      Plot.text([{t:9, y:1.06, label:'pos limit'}], {x:'t', y:'y', text:'label', fill:'#f87171', fontSize:9, dy:-6})
+    ]
+  });
+  document.getElementById('chart-angle').append(anglePlot);
+
+  // ── Oscillator chart ──
+  const oscPlot = Plot.plot({
+    style: chartStyle,
+    width: 520, height: 260,
+    marginLeft: 48, marginBottom: 36,
+    x: {label: 't (s) →', grid: true, ticks: 5, domain:[0,10]},
+    y: {label: '↑ effector output', grid: true, ticks: 5, domain:[-0.25, 0.25]},
+    marks: [
+      Plot.ruleY([0], {stroke:'#3a3a52', strokeWidth:1}),
+      Plot.rect([{x1:1, x2:7.8}], {x1:'x1', x2:'x2', y1:-0.25, y2:0.25, fill:'rgba(248,113,113,0.08)'}),
+      Plot.line(OSC, {x:'t', y:'v', stroke:'#c084fc', strokeWidth:2}),
+      Plot.text([{t:4.4, v:0.22, label:'stays negative → joint pinned'}], {x:'t', y:'v', text:'label', fill:'#f87171', fontSize:10})
+    ]
+  });
+  document.getElementById('chart-osc').append(oscPlot);
+
+  // ── Slide engine ──
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const navDots = document.getElementById('nav-dots');
+  const counter = document.getElementById('counter');
+  const sectionLabel = document.getElementById('section-label');
+  let idx = 0;
+
+  // Build nav dots with section grouping
+  let lastSection = null;
+  slides.forEach((s, i) => {
+    const sec = s.dataset.section;
+    if (lastSection && sec !== lastSection) {
+      const sp = document.createElement('span'); sp.className = 'nav-spacer'; navDots.append(sp);
+    }
+    lastSection = sec;
+    const b = document.createElement('button');
+    b.className = 'nav-dot' + (i===0?' active':'');
+    b.addEventListener('click', () => goto(i));
+    navDots.append(b);
+  });
+  const dots = Array.from(navDots.querySelectorAll('.nav-dot'));
+
+  function goto(n, dir=0){
+    if (n<0 || n>=slides.length) return;
+    const from = idx;
+    idx = n;
+    slides.forEach((s,i)=>{
+      s.classList.remove('active','enter-left','enter-right');
+      if (i===idx) {
+        if (dir>0) s.classList.add('enter-right');
+        else if (dir<0) s.classList.add('enter-left');
+        requestAnimationFrame(()=>s.classList.add('active'));
+      }
+    });
+    dots.forEach((d,i)=>d.classList.toggle('active', i===idx));
+    counter.textContent = String(idx+1).padStart(2,'0') + ' / ' + String(slides.length).padStart(2,'0');
+    sectionLabel.textContent = slides[idx].dataset.section;
+  }
+  goto(0);
+
+  // Keyboard
+  window.addEventListener('keydown', e => {
+    if (e.key==='ArrowRight' || e.key===' ' || e.key==='PageDown') { e.preventDefault(); goto(idx+1, 1); }
+    else if (e.key==='ArrowLeft' || e.key==='PageUp') { e.preventDefault(); goto(idx-1, -1); }
+    else if (e.key==='Home') goto(0);
+    else if (e.key==='End') goto(slides.length-1);
+  });
+
+  // Touch swipe
+  let tsx=0;
+  window.addEventListener('touchstart', e=>{tsx=e.touches[0].clientX});
+  window.addEventListener('touchend', e=>{
+    const dx = e.changedTouches[0].clientX - tsx;
+    if (Math.abs(dx) > 60) goto(idx + (dx<0?1:-1), dx<0?1:-1);
+  });
+
+  // Fix filter toggle
+  document.querySelectorAll('.toggle-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.toggle-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const cat = btn.dataset.fix;
+      document.querySelectorAll('#fix-grid .fix-card').forEach(c=>{
+        c.style.display = (cat==='all' || c.dataset.cat===cat) ? '' : 'none';
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
