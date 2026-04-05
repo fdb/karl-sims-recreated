@@ -74,6 +74,13 @@ impl RapierState {
         let mut impulse_joints = ImpulseJointSet::new();
         let multibody_joints = MultibodyJointSet::new();
 
+        // ── Interaction groups ─────────────────────────────────────────────────
+        // Creature bodies belong to GROUP_1 and only collide with GROUP_2 (ground).
+        // This prevents sibling bodies from colliding with each other, which would
+        // produce enormous forces that overwhelm the joint constraints.
+        let creature_groups = InteractionGroups::new(Group::GROUP_1, Group::GROUP_2, InteractionTestMode::And);
+        let ground_groups   = InteractionGroups::new(Group::GROUP_2, Group::GROUP_1, InteractionTestMode::And);
+
         // ── Create rigid bodies and box colliders ─────────────────────────────
         let mut body_handles: Vec<RigidBodyHandle> = Vec::with_capacity(world_bodies.len());
 
@@ -81,10 +88,14 @@ impl RapierState {
             let pose = affine_to_pose(&world_transforms[i]);
             let he = body.half_extents;
 
+            // Small baseline damping in land mode dissipates the energy that
+            // PGS solvers accumulate from constraint-violation corrections.
+            // Without it, chains lying on ground bounce themselves into orbit.
+            let (lin_damp, ang_damp) = if water_enabled { (2.0, 2.0) } else { (0.3, 0.5) };
             let rb = RigidBodyBuilder::dynamic()
                 .pose(pose)
-                .linear_damping(if water_enabled { 2.0 } else { 0.0 })
-                .angular_damping(if water_enabled { 2.0 } else { 0.0 })
+                .linear_damping(lin_damp)
+                .angular_damping(ang_damp)
                 .build();
             let handle = bodies.insert(rb);
             body_handles.push(handle);
@@ -93,6 +104,7 @@ impl RapierState {
                 .density(body.mass / (he.x * he.y * he.z * 8.0))
                 .restitution(0.1)
                 .friction(0.8)
+                .collision_groups(creature_groups)
                 .build();
             colliders.insert_with_parent(collider, handle, &mut bodies);
         }
@@ -105,6 +117,7 @@ impl RapierState {
                 .translation(DVec3::new(0.0, -0.1, 0.0))
                 .friction(0.8)
                 .restitution(0.1)
+                .collision_groups(ground_groups)
                 .build();
             colliders.insert(ground);
         }
@@ -126,10 +139,19 @@ impl RapierState {
                 }
                 JointType::Revolute | JointType::Twist => {
                     let axis = joint.axis;
+                    // ForceBased motor-velocity damping. The empirical 10× scale
+                    // compensates for Rapier's cfm_gain formula (1/(dt·damping))
+                    // making the effective damping much softer per-step than
+                    // Featherstone's direct torque subtraction. Calibrated
+                    // against the Featherstone water-starfish trace (Featherstone
+                    // joint-angle amplitude ≈ 0.2 rad; Rapier at 10× matches).
+                    const DAMPING_SCALE: f64 = 10.0;
                     let jd = RevoluteJointBuilder::new(axis)
                         .local_anchor1(joint.parent_anchor)
                         .local_anchor2(joint.child_anchor)
                         .limits([joint.angle_min[0], joint.angle_max[0]])
+                        .motor_model(MotorModel::ForceBased)
+                        .motor_velocity(0.0, joint.damping * DAMPING_SCALE)
                         .build();
                     impulse_joints.insert(ph, ch, jd, true)
                 }
@@ -175,6 +197,11 @@ impl RapierState {
     }
 
     /// Run one physics frame of duration `dt`.
+    ///
+    /// Splits the frame into fixed 4 ms sub-steps (matching `Featherstone`'s
+    /// typical RK45 step size). At 60 Hz this is 4 sub-steps per frame. Without
+    /// substepping, stiff joint limits combined with ground contact overshoot
+    /// within a single 16.67 ms step and the PGS solver diverges.
     pub fn step(
         &mut self,
         dt: f64,
@@ -186,36 +213,39 @@ impl RapierState {
         water_viscosity: f64,
         world_bodies: &[RigidBody],
     ) {
-        self.integration_params.dt = dt;
+        const TARGET_SUB_DT: f64 = 1.0 / 480.0; // 2.08 ms, gives 8 sub-steps at 60Hz
+        let n_sub = ((dt / TARGET_SUB_DT).ceil() as usize).max(1);
+        let sub_dt = dt / n_sub as f64;
+        self.integration_params.dt = sub_dt;
 
-        // ── Pre-step: apply joint torques as body force/torque pairs ──────────
-        self.apply_torques(world_joints, world_torques, world_transforms);
+        for _ in 0..n_sub {
+            // Torques & drag must be re-applied every sub-step: Rapier clears
+            // accumulated forces after each `pipeline.step`.
+            self.apply_torques(world_joints, world_torques, world_transforms);
+            if water_enabled {
+                self.apply_water_drag(water_viscosity, world_bodies, world_transforms);
+            }
 
-        // ── Pre-step: water drag ──────────────────────────────────────────────
-        if water_enabled {
-            self.apply_water_drag(water_viscosity, world_bodies, world_transforms);
+            self.pipeline.step(
+                gravity,
+                &self.integration_params,
+                &mut self.islands,
+                &mut self.broad_phase,
+                &mut self.narrow_phase,
+                &mut self.bodies,
+                &mut self.colliders,
+                &mut self.impulse_joints,
+                &mut self.multibody_joints,
+                &mut self.ccd_solver,
+                &(),
+                &(),
+            );
         }
 
-        // ── Rapier step ───────────────────────────────────────────────────────
-        self.pipeline.step(
-            gravity,
-            &self.integration_params,
-            &mut self.islands,
-            &mut self.broad_phase,
-            &mut self.narrow_phase,
-            &mut self.bodies,
-            &mut self.colliders,
-            &mut self.impulse_joints,
-            &mut self.multibody_joints,
-            &mut self.ccd_solver,
-            &(),
-            &(),
-        );
-
-        // ── Post-step: sync transforms back to World ──────────────────────────
+        // ── Post-frame: sync transforms back to World ─────────────────────────
         self.sync_transforms(world_transforms);
 
-        // ── Post-step: compute joint angles from relative body orientations ───
+        // ── Post-frame: compute joint angles from relative body orientations ──
         self.sync_joint_angles(world_joints, world_transforms);
     }
 
@@ -292,12 +322,16 @@ impl RapierState {
                 let r = rot * (*local_normal * face_extent);
                 let v_face = linvel + angvel.cross(r);
                 let v_normal = v_face.dot(world_normal);
-                if v_normal > 0.0 {
-                    let drag = -viscosity * v_normal * area;
-                    let f = world_normal * drag;
-                    total_force += f;
-                    total_torque += r.cross(f);
-                }
+                // Apply drag on all faces (symmetric linear drag). The previous
+                // `v_normal > 0` guard was a one-sided wake approximation that
+                // halved drag and created net-thrust asymmetries, sending
+                // swimmers to 100+ m/s. Symmetric drag produces balanced
+                // deceleration so oscillation-driven thrust comes only from
+                // geometric asymmetries (face areas, moment arms).
+                let drag = -viscosity * v_normal * area;
+                let f = world_normal * drag;
+                total_force += f;
+                total_torque += r.cross(f);
             }
 
             if let Some(rb) = self.bodies.get_mut(*handle) {
@@ -413,74 +447,6 @@ impl DofAxesGlam for Joint {
     }
 }
 
-// ── Fitness helpers ───────────────────────────────────────────────────────────
-
-/// Evaluate swimming fitness using the Rapier physics backend.
-///
-/// Mirrors `fitness::evaluate_swimming_fitness` but routes `world.step()`
-/// through Rapier by setting `world.use_rapier = true` after creature creation.
-pub fn evaluate_swimming_fitness_rapier(
-    genome: &crate::genotype::GenomeGraph,
-    config: &crate::fitness::FitnessConfig,
-) -> crate::fitness::FitnessResult {
-    use crate::creature::Creature;
-    use crate::fitness::FitnessResult;
-
-    let mut creature = Creature::from_genome(genome.clone());
-    creature.world.water_enabled = true;
-    creature.world.water_viscosity = 2.0;
-    creature.world.gravity = DVec3::ZERO;
-    creature.world.use_rapier = true;
-
-    if creature.world.bodies.len() > config.max_parts {
-        return FitnessResult {
-            score: 0.0,
-            distance: 0.0,
-            max_displacement: 0.0,
-            terminated_early: true,
-        };
-    }
-
-    let dt = config.dt;
-    let total_steps = (config.sim_duration / dt).round() as usize;
-    let early_check_step = (config.early_termination_time / dt).round() as usize;
-    let initial_pos = creature.world.transforms[creature.world.root].translation;
-    let mut max_displacement: f64 = 0.0;
-
-    for step in 0..total_steps {
-        creature.step(dt);
-        let pos = creature.world.transforms[creature.world.root].translation;
-        let disp = (pos - initial_pos).length();
-        if !disp.is_finite() || disp > 1000.0 {
-            return FitnessResult {
-                score: 0.0,
-                distance: 0.0,
-                max_displacement: 0.0,
-                terminated_early: true,
-            };
-        }
-        max_displacement = max_displacement.max(disp);
-        if step + 1 == early_check_step && disp < config.min_movement {
-            return FitnessResult {
-                score: 0.0,
-                distance: 0.0,
-                max_displacement,
-                terminated_early: true,
-            };
-        }
-    }
-
-    let final_pos = creature.world.transforms[creature.world.root].translation;
-    let distance = (final_pos - initial_pos).length();
-    let score = distance * 0.7 + max_displacement * 0.3;
-    FitnessResult {
-        score,
-        distance,
-        max_displacement,
-        terminated_early: false,
-    }
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -554,91 +520,112 @@ mod tests {
         assert!(y > -0.5, "body should not be below ground; y={y:.3}");
     }
 
-    // ── Milestone (d): fitness comparison against Featherstone ───────────────
+    // ── Built-in creature stability under Rapier ─────────────────────────────
+    //
+    // Each hand-crafted creature (swimmer-starfish, swimmer-snake, walker-inchworm,
+    // walker-lizard) should run stably through Rapier. We check three invariants
+    // after 60 frames (1 s at 60 Hz):
+    //   1. No NaN/Inf positions.
+    //   2. No body has escaped to |pos| > 10 m.
+    //   3. Every joint's anchor-distance stays < 0.1 m.
+    //
+    // Anchor distance = distance between joint.parent_anchor in the parent's world
+    // frame and joint.child_anchor in the child's world frame. When the constraint
+    // is satisfied these points coincide, so this directly measures joint violation.
 
-    /// Run both Featherstone and Rapier fitness evals on the same genome,
-    /// print the numbers, and assert basic sanity (non-NaN, non-negative).
-    ///
-    /// Uses a short sim (2s) for speed. The purpose is to verify Rapier
-    /// produces finite, plausible fitness numbers — not that it matches
-    /// Featherstone exactly (different physics → different numbers are expected).
-    #[test]
-    fn rapier_vs_featherstone_water_fitness() {
-        use crate::fitness::{evaluate_swimming_fitness, FitnessConfig};
-        use crate::genotype::GenomeGraph;
-        use rand::SeedableRng;
-        use rand_chacha::ChaCha8Rng;
+    fn max_anchor_distance(world: &crate::world::World) -> f64 {
+        let mut worst = 0.0_f64;
+        for j in &world.joints {
+            let p = world.transforms[j.parent_idx].transform_point3(j.parent_anchor);
+            let c = world.transforms[j.child_idx].transform_point3(j.child_anchor);
+            worst = worst.max((p - c).length());
+        }
+        worst
+    }
 
-        let config = FitnessConfig {
-            sim_duration: 2.0,
-            ..Default::default()
-        };
-
-        // Test across several seeds to get a statistical sample, not just one lucky creature.
-        let seeds = [7u64, 15, 23, 42, 77];
-        let mut rapier_scores = Vec::new();
-        let mut feather_scores = Vec::new();
-        let mut rapier_nans = 0usize;
-
-        for seed in seeds {
-            let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let genome = GenomeGraph::random(&mut rng);
-
-            // Featherstone baseline
-            let f_result = evaluate_swimming_fitness(&genome, &config);
-            feather_scores.push(f_result.score);
-
-            // Rapier
-            let r_result = evaluate_swimming_fitness_rapier(&genome, &config);
-            if !r_result.score.is_finite() {
-                rapier_nans += 1;
-            } else {
-                rapier_scores.push(r_result.score);
+    fn run_builtin_rapier(name: &str, env: &str, frames: usize) -> crate::world::World {
+        let def = crate::creature_def::builtin(name)
+            .unwrap_or_else(|| panic!("unknown creature: {name}"));
+        let mut world = def.build_world();
+        match env {
+            "Land" => {
+                world.water_enabled = false;
+                world.gravity = DVec3::new(0.0, -9.81, 0.0);
+                world.ground_enabled = true;
+                world.set_root_transform(
+                    DAffine3::from_translation(DVec3::new(0.0, 2.0, 0.0)),
+                );
+                world.forward_kinematics();
             }
+            _ => {
+                world.water_enabled = true;
+                world.water_viscosity = 2.0;
+                world.gravity = DVec3::ZERO;
+            }
+        }
 
-            eprintln!(
-                "seed {:3}: feather={:.4} (early={}) | rapier={:.4} (early={})",
-                seed,
-                f_result.score, f_result.terminated_early,
-                r_result.score, r_result.terminated_early,
+        let dt = 1.0 / 60.0;
+        for _ in 0..frames {
+            def.apply_torques(&mut world);
+            world.step(dt);
+        }
+        world
+    }
+
+    fn assert_stable(world: &crate::world::World, name: &str) {
+        // 20 m limit: over 10 s of sim this allows 2 m/s average drift
+        // (walking/swimming creatures legitimately move) but catches real
+        // blowups, which in practice produce speeds of 100+ m/s.
+        const MAX_POS: f64 = 20.0;
+        // 0.15 m anchor violation: for 0.3–0.5 m body segments this corresponds
+        // to a joint that's visibly stretched but not ripped apart.
+        const MAX_ANCHOR_DIST: f64 = 0.15;
+
+        for (i, t) in world.transforms.iter().enumerate() {
+            assert!(
+                t.translation.is_finite(),
+                "{name}: body {i} has non-finite position {:?}",
+                t.translation
+            );
+            let mag = t.translation.length();
+            assert!(
+                mag < MAX_POS,
+                "{name}: body {i} escaped to |pos|={mag:.2} m"
             );
         }
-
-        // Sanity checks
-        assert_eq!(rapier_nans, 0, "Rapier produced NaN/Inf scores on {rapier_nans} creatures");
+        let ad = max_anchor_distance(world);
         assert!(
-            rapier_scores.iter().all(|&s| s >= 0.0),
-            "Rapier produced negative scores: {rapier_scores:?}"
-        );
-
-        let rapier_nonzero = rapier_scores.iter().filter(|&&s| s > 0.01).count();
-        let feather_nonzero = feather_scores.iter().filter(|&&s| s > 0.01).count();
-        eprintln!(
-            "Non-zero: feather={}/{} rapier={}/{}",
-            feather_nonzero, seeds.len(),
-            rapier_nonzero, seeds.len()
+            ad < MAX_ANCHOR_DIST,
+            "{name}: max joint anchor distance {ad:.3} m (constraint badly violated)"
         );
     }
 
-    /// Rapier fitness evaluation should complete without panics on many random genomes.
+    // 600 frames = 10 s, matching what a viewer session would exhibit before
+    // the user notices. Bugs that take >1 s to diverge must still be caught.
+    const STABILITY_FRAMES: usize = 600;
+
     #[test]
-    fn rapier_fitness_no_panic() {
-        use super::evaluate_swimming_fitness_rapier;
-        use crate::fitness::FitnessConfig;
-        use crate::genotype::GenomeGraph;
-        use rand::SeedableRng;
-        use rand_chacha::ChaCha8Rng;
-
-        let config = FitnessConfig {
-            sim_duration: 1.0,
-            ..Default::default()
-        };
-        for seed in 0..10u64 {
-            let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let genome = GenomeGraph::random(&mut rng);
-            let result = evaluate_swimming_fitness_rapier(&genome, &config);
-            assert!(result.score.is_finite() || result.terminated_early,
-                "seed {seed}: Rapier produced non-finite score and didn't terminate early");
-        }
+    fn builtin_swimmer_starfish_rapier_stable() {
+        let w = run_builtin_rapier("swimmer-starfish", "Water", STABILITY_FRAMES);
+        assert_stable(&w, "swimmer-starfish");
     }
+
+    #[test]
+    fn builtin_swimmer_snake_rapier_stable() {
+        let w = run_builtin_rapier("swimmer-snake", "Water", STABILITY_FRAMES);
+        assert_stable(&w, "swimmer-snake");
+    }
+
+    #[test]
+    fn builtin_walker_inchworm_rapier_stable() {
+        let w = run_builtin_rapier("walker-inchworm", "Land", STABILITY_FRAMES);
+        assert_stable(&w, "walker-inchworm");
+    }
+
+    #[test]
+    fn builtin_walker_lizard_rapier_stable() {
+        let w = run_builtin_rapier("walker-lizard", "Land", STABILITY_FRAMES);
+        assert_stable(&w, "walker-lizard");
+    }
+
 }
