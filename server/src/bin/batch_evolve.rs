@@ -50,6 +50,8 @@ fn main() {
         migration_interval: 20,
         min_joint_motion: Some(0.3),
         settle_duration: Some(1.0),
+        num_signal_channels: 0,
+        growth_interval: None,
     };
 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);

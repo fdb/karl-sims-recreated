@@ -6,12 +6,26 @@ use crate::world::World;
 // BrainInstance
 // ---------------------------------------------------------------------------
 
+/// An entry that writes a neuron's output to a shared signal channel.
+#[derive(Debug, Clone)]
+struct SignalEffectorEntry {
+    input: RemappedInput,
+    weight: f64,
+    channel: usize,
+}
+
 pub struct BrainInstance {
     pub outputs: Vec<f64>,
     pub prev_outputs: Vec<f64>,
     neurons: Vec<NeuronEntry>,
     effectors: Vec<EffectorEntry>,
+    signal_effectors: Vec<SignalEffectorEntry>,
     sensors: Vec<f64>,
+    /// Shared broadcast signal buffer — read by NeuronInput::Signal,
+    /// written by signal effectors. Double-buffered: neurons read from
+    /// `signals` (previous step), signal effectors write to `signals_next`.
+    pub signals: Vec<f64>,
+    pub signals_next: Vec<f64>,
     time: f64,
 }
 
@@ -54,6 +68,7 @@ enum RemappedInput {
     Neuron(usize),
     Sensor(usize),
     Constant(f64),
+    Signal(usize),
 }
 
 impl BrainInstance {
@@ -62,8 +77,33 @@ impl BrainInstance {
     /// Collects neurons and effectors from each body part's brain graph,
     /// remapping local neuron indices to global flat indices.
     pub fn from_phenotype(genome: &GenomeGraph, phenotype: &Phenotype) -> Self {
+        Self::from_phenotype_with_signals(genome, phenotype, 0)
+    }
+
+    /// Build a BrainInstance with a specified number of shared signal channels.
+    ///
+    /// `num_signal_channels` determines the size of the broadcast signal buffer.
+    /// Signal channels enable inter-body neural communication: any body part's
+    /// brain can read from or write to shared channels, allowing coordination
+    /// (e.g., synchronized gaits in multi-segment creatures).
+    pub fn from_phenotype_with_signals(
+        genome: &GenomeGraph,
+        phenotype: &Phenotype,
+        num_signal_channels: usize,
+    ) -> Self {
         let mut neurons: Vec<NeuronEntry> = Vec::new();
         let mut effectors: Vec<EffectorEntry> = Vec::new();
+        let mut signal_effectors: Vec<SignalEffectorEntry> = Vec::new();
+
+        // Helper closure to remap NeuronInput to RemappedInput.
+        let remap = |inp: &NeuronInput, offset: usize| -> RemappedInput {
+            match inp {
+                NeuronInput::Neuron(idx) => RemappedInput::Neuron(offset + idx),
+                NeuronInput::Sensor(idx) => RemappedInput::Sensor(*idx),
+                NeuronInput::Constant(v) => RemappedInput::Constant(*v),
+                NeuronInput::Signal(ch) => RemappedInput::Signal(*ch),
+            }
+        };
 
         // For each body in the phenotype, collect its brain.
         // We need to know the neuron offset per body part.
@@ -81,14 +121,7 @@ impl BrainInstance {
                 let inputs: Vec<(RemappedInput, f64)> = node
                     .inputs
                     .iter()
-                    .map(|(inp, w)| {
-                        let remapped = match inp {
-                            NeuronInput::Neuron(idx) => RemappedInput::Neuron(offset + idx),
-                            NeuronInput::Sensor(idx) => RemappedInput::Sensor(*idx),
-                            NeuronInput::Constant(v) => RemappedInput::Constant(*v),
-                        };
-                        (remapped, *w)
-                    })
+                    .map(|(inp, w)| (remap(inp, offset), *w))
                     .collect();
 
                 neurons.push(NeuronEntry {
@@ -124,19 +157,24 @@ impl BrainInstance {
                 let max_dim = (child_he.x.max(child_he.y).max(child_he.z)) * 2.0;
                 let max_torque = max_dim * TORQUE_PER_METER;
 
-                let remapped_input = match &eff.input {
-                    NeuronInput::Neuron(idx) => RemappedInput::Neuron(offset + idx),
-                    NeuronInput::Sensor(idx) => RemappedInput::Sensor(*idx),
-                    NeuronInput::Constant(v) => RemappedInput::Constant(*v),
-                };
-
                 effectors.push(EffectorEntry {
-                    input: remapped_input,
+                    input: remap(&eff.input, offset),
                     weight: eff.weight,
                     joint_idx,
                     dof,
                     max_torque,
                 });
+            }
+
+            // Collect signal effectors for inter-body communication.
+            for sig_eff in &brain.signal_effectors {
+                if sig_eff.channel < num_signal_channels {
+                    signal_effectors.push(SignalEffectorEntry {
+                        input: remap(&sig_eff.input, offset),
+                        weight: sig_eff.weight,
+                        channel: sig_eff.channel,
+                    });
+                }
             }
         }
 
@@ -146,19 +184,23 @@ impl BrainInstance {
             let inputs: Vec<(RemappedInput, f64)> = node
                 .inputs
                 .iter()
-                .map(|(inp, w)| {
-                    let remapped = match inp {
-                        NeuronInput::Neuron(idx) => RemappedInput::Neuron(global_offset + idx),
-                        NeuronInput::Sensor(idx) => RemappedInput::Sensor(*idx),
-                        NeuronInput::Constant(v) => RemappedInput::Constant(*v),
-                    };
-                    (remapped, *w)
-                })
+                .map(|(inp, w)| (remap(inp, global_offset), *w))
                 .collect();
             neurons.push(NeuronEntry {
                 func: node.func,
                 inputs,
             });
+        }
+
+        // Collect global brain signal effectors.
+        for sig_eff in &genome.global_brain.signal_effectors {
+            if sig_eff.channel < num_signal_channels {
+                signal_effectors.push(SignalEffectorEntry {
+                    input: remap(&sig_eff.input, global_offset),
+                    weight: sig_eff.weight,
+                    channel: sig_eff.channel,
+                });
+            }
         }
 
         let num_neurons = neurons.len();
@@ -169,7 +211,10 @@ impl BrainInstance {
             prev_outputs: vec![0.0; num_neurons],
             neurons,
             effectors,
+            signal_effectors,
             sensors: vec![0.0; num_sensors],
+            signals: vec![0.0; num_signal_channels],
+            signals_next: vec![0.0; num_signal_channels],
             time: 0.0,
         }
     }
@@ -222,6 +267,9 @@ impl BrainInstance {
                             self.sensors.get(*idx).copied().unwrap_or(0.0)
                         }
                         RemappedInput::Constant(v) => *v,
+                        RemappedInput::Signal(ch) => {
+                            self.signals.get(*ch).copied().unwrap_or(0.0)
+                        }
                     };
                     val * weight
                 })
@@ -273,6 +321,7 @@ impl BrainInstance {
                 RemappedInput::Neuron(idx) => self.outputs.get(*idx).copied().unwrap_or(0.0),
                 RemappedInput::Sensor(idx) => self.sensors.get(*idx).copied().unwrap_or(0.0),
                 RemappedInput::Constant(v) => *v,
+                RemappedInput::Signal(ch) => self.signals.get(*ch).copied().unwrap_or(0.0),
             };
             // (val * weight) is the commanded fraction of the motion budget,
             // clamped to [-1, 1]. Then we scale by the physical torque limit.
@@ -283,6 +332,35 @@ impl BrainInstance {
             let torque = command * eff.max_torque;
             world.torques[eff.joint_idx][eff.dof] = torque;
         }
+    }
+
+    /// Write signal effector outputs to the next-step signal buffer.
+    /// Called after evaluate_step so neuron outputs are current.
+    fn write_signals(&mut self) {
+        // Zero the next buffer.
+        for v in self.signals_next.iter_mut() {
+            *v = 0.0;
+        }
+        // Accumulate signal outputs (multiple effectors can write to the
+        // same channel — their contributions are summed, then clamped).
+        for sig_eff in &self.signal_effectors {
+            let val = match &sig_eff.input {
+                RemappedInput::Neuron(idx) => self.outputs.get(*idx).copied().unwrap_or(0.0),
+                RemappedInput::Sensor(idx) => self.sensors.get(*idx).copied().unwrap_or(0.0),
+                RemappedInput::Constant(v) => *v,
+                RemappedInput::Signal(ch) => self.signals.get(*ch).copied().unwrap_or(0.0),
+            };
+            let contribution = (val * sig_eff.weight).clamp(-1.0, 1.0);
+            if let Some(slot) = self.signals_next.get_mut(sig_eff.channel) {
+                *slot += contribution;
+            }
+        }
+        // Clamp accumulated signals to [-1, 1].
+        for v in self.signals_next.iter_mut() {
+            *v = v.clamp(-1.0, 1.0);
+        }
+        // Swap: signals_next becomes current for next step.
+        std::mem::swap(&mut self.signals, &mut self.signals_next);
     }
 
     /// Reset brain time to zero. Used after the settle phase so the
@@ -302,7 +380,9 @@ impl BrainInstance {
 
         // Two brain steps per physics step.
         self.evaluate_step();
+        self.write_signals();
         self.evaluate_step();
+        self.write_signals();
 
         self.apply_effectors(world);
     }
@@ -386,6 +466,7 @@ mod tests {
                     brain: BrainGraph {
                         neurons: Vec::new(),
                         effectors: Vec::new(),
+                        signal_effectors: Vec::new(),
                     },
                 },
                 MorphNode {
@@ -407,6 +488,7 @@ mod tests {
                             input: NeuronInput::Neuron(0),
                             weight: 2.0,
                         }],
+                        signal_effectors: Vec::new(),
                     },
                 },
             ],
@@ -422,6 +504,7 @@ mod tests {
             global_brain: BrainGraph {
                 neurons: Vec::new(),
                 effectors: Vec::new(),
+                signal_effectors: Vec::new(),
             },
         };
 
@@ -466,7 +549,7 @@ mod tests {
                     joint_limit_max: [1.0; 3],
                     recursive_limit: 1,
                     terminal_only: false,
-                    brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+                    brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
                 },
                 MorphNode {
                     dimensions: child_dims,
@@ -481,6 +564,7 @@ mod tests {
                             input: NeuronInput::Constant(effector_command),
                             weight: effector_weight,
                         }],
+                        signal_effectors: Vec::new(),
                     },
                 },
             ],
@@ -493,7 +577,7 @@ mod tests {
                 reflection: false,
             }],
             root: 0,
-            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
         };
         let pheno = develop(&genome);
         assert_eq!(pheno.world.joints.len(), 1);

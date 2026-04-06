@@ -1,6 +1,7 @@
 mod api;
 mod coordinator;
 mod db;
+mod timing;
 mod worker;
 mod ws;
 
@@ -11,8 +12,15 @@ use db::init_db;
 async fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let db = init_db("karl-sims.db");
+    let db_path = std::env::var("PARK_DB").unwrap_or_else(|_| "park.db".to_string());
+    let db_path = db_path.as_str();
+    let db = init_db(db_path);
     log::info!("Database initialized");
+
+    // Profiling: periodic p50/p99 table + WAL-size monitor. Low overhead
+    // (see `timing.rs`), runs for the lifetime of the process.
+    timing::spawn_reporter();
+    timing::spawn_wal_monitor(db_path.to_string());
 
     let num_workers = num_cpus::get().max(1);
     log::info!("Starting {num_workers} workers");

@@ -72,6 +72,16 @@ pub enum NeuronInput {
     Neuron(usize),
     Sensor(usize),
     Constant(f64),
+    /// Read from a shared broadcast signal channel. All body-part brains
+    /// within a creature share a single signal buffer, enabling inter-body
+    /// communication for coordinated gaits.
+    ///
+    /// Sims 1994: no explicit inter-body signals — neurons were local to
+    /// each body part.
+    /// Our variant: broadcast channels let segments synchronize (e.g.,
+    /// centipede fin-beat coordination). Configurable via
+    /// `EvolutionParams::num_signal_channels`.
+    Signal(usize),
 }
 
 impl PartialEq for NeuronInput {
@@ -80,6 +90,7 @@ impl PartialEq for NeuronInput {
             (NeuronInput::Neuron(a), NeuronInput::Neuron(b)) => a == b,
             (NeuronInput::Sensor(a), NeuronInput::Sensor(b)) => a == b,
             (NeuronInput::Constant(a), NeuronInput::Constant(b)) => a.to_bits() == b.to_bits(),
+            (NeuronInput::Signal(a), NeuronInput::Signal(b)) => a == b,
             _ => false,
         }
     }
@@ -99,9 +110,21 @@ pub struct EffectorNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignalEffectorNode {
+    pub input: NeuronInput,
+    pub weight: f64,
+    /// Which shared signal channel this effector writes to.
+    pub channel: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrainGraph {
     pub neurons: Vec<BrainNode>,
     pub effectors: Vec<EffectorNode>,
+    /// Signal effectors that write to shared broadcast channels for
+    /// inter-body communication. Empty by default for backward compat.
+    #[serde(default)]
+    pub signal_effectors: Vec<SignalEffectorNode>,
 }
 
 impl BrainGraph {
@@ -137,7 +160,7 @@ impl BrainGraph {
             });
         }
 
-        BrainGraph { neurons, effectors }
+        BrainGraph { neurons, effectors, signal_effectors: Vec::new() }
     }
 }
 
@@ -235,6 +258,7 @@ impl GenomeGraph {
         let global_brain = BrainGraph {
             neurons: Vec::new(),
             effectors: Vec::new(),
+            signal_effectors: Vec::new(),
         };
 
         GenomeGraph {

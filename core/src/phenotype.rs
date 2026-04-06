@@ -30,6 +30,28 @@ pub struct Phenotype {
     pub sensor_map: Vec<SensorInfo>,
 }
 
+/// A deferred growth step: all the info needed to add one body segment
+/// to a creature mid-simulation, following the BFS expansion order.
+#[derive(Debug, Clone)]
+pub struct GrowthStep {
+    /// Index of the genotype node for this body.
+    pub geno_node_idx: usize,
+    /// Index of the parent body in the world (already instantiated).
+    pub parent_body_idx: usize,
+    /// Connection from the genome that produced this growth step.
+    pub conn_idx: usize,
+    /// Recursion depth of this body.
+    pub depth: u32,
+}
+
+/// A plan for incremental growth: root is developed immediately,
+/// remaining bodies are queued for later instantiation.
+#[derive(Debug, Clone)]
+pub struct GrowthPlan {
+    pub steps: Vec<GrowthStep>,
+    pub next_step: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Helper: perpendicular axes to a given normal
 // ---------------------------------------------------------------------------
@@ -185,6 +207,154 @@ pub fn develop(genome: &GenomeGraph) -> Phenotype {
     }
 }
 
+/// Develop only the root body, returning a growth plan for the remaining
+/// bodies. Used by the developmental growth system.
+pub fn develop_with_growth_plan(genome: &GenomeGraph) -> (Phenotype, GrowthPlan) {
+    let mut world = World::new();
+    world.water_enabled = true;
+    world.gravity = DVec3::ZERO;
+
+    let mut body_node_map: Vec<(usize, u32)> = Vec::new();
+    let mut sensor_map: Vec<SensorInfo> = Vec::new();
+
+    let mut visit_count: Vec<u32> = vec![0; genome.nodes.len()];
+
+    // Root body
+    let root_node = &genome.nodes[genome.root];
+    let root_body = world.add_body(root_node.dimensions * 0.5);
+    world.root = root_body;
+    body_node_map.push((genome.root, 0));
+    visit_count[genome.root] += 1;
+
+    for axis in 0..3 {
+        sensor_map.push(SensorInfo {
+            body_idx: root_body,
+            sensor_type: SensorType::PhotoSensor { body_idx: root_body, axis },
+        });
+    }
+
+    // BFS to build the growth plan (same order as develop(), but deferred).
+    let mut growth_steps: Vec<GrowthStep> = Vec::new();
+    let mut queue: VecDeque<(usize, usize, u32)> = VecDeque::new();
+    queue.push_back((genome.root, root_body, 0));
+
+    while let Some((geno_node_idx, parent_body_idx, depth)) = queue.pop_front() {
+        for (ci, conn) in genome.connections.iter().enumerate() {
+            if conn.source != geno_node_idx {
+                continue;
+            }
+            let target_node = &genome.nodes[conn.target];
+            if visit_count[conn.target] >= target_node.recursive_limit {
+                continue;
+            }
+            if target_node.terminal_only && depth == 0 {
+                continue;
+            }
+            visit_count[conn.target] += 1;
+            let child_depth = depth + 1;
+
+            // The body index for this child will be determined when it's actually
+            // grown, but we need the parent's body index (which is already known).
+            growth_steps.push(GrowthStep {
+                geno_node_idx: conn.target,
+                parent_body_idx,
+                conn_idx: ci,
+                depth: child_depth,
+            });
+
+            // For future children of this node, the parent_body_idx will be
+            // updated when this step is actually executed. We use a placeholder
+            // for now -- the index will be `body_node_map.len()` at execution time.
+            // We need to continue the BFS using a "virtual" body index.
+            let virtual_body_idx = root_body + growth_steps.len();
+            queue.push_back((conn.target, virtual_body_idx, child_depth));
+        }
+    }
+
+    let num_effectors = genome.nodes[genome.root].brain.effectors.len();
+    world.forward_kinematics();
+
+    let pheno = Phenotype {
+        world,
+        body_node_map,
+        num_effectors,
+        sensor_map,
+    };
+
+    let plan = GrowthPlan {
+        steps: growth_steps,
+        next_step: 0,
+    };
+
+    (pheno, plan)
+}
+
+/// Execute one growth step: add a body and joint to the world.
+///
+/// Updates `body_node_map`, `sensor_map`, and returns the new body index.
+/// The parent body index in the growth step must be valid (already instantiated).
+pub fn grow_one_step(
+    genome: &GenomeGraph,
+    world: &mut World,
+    body_node_map: &mut Vec<(usize, u32)>,
+    sensor_map: &mut Vec<SensorInfo>,
+    step: &GrowthStep,
+) -> usize {
+    let conn = &genome.connections[step.conn_idx];
+    let target_node = &genome.nodes[step.geno_node_idx];
+
+    const MIN_HALF_EXTENT: f64 = 0.03;
+    let child_half_extents = (target_node.dimensions * conn.scale * 0.5)
+        .max(DVec3::splat(MIN_HALF_EXTENT));
+    let parent_half_extents = world.bodies[step.parent_body_idx].half_extents;
+
+    // Position the new body adjacent to its parent, at the joint attachment point.
+    let parent_anchor = conn.parent_face.center(parent_half_extents);
+    let child_anchor = conn.child_face.center(child_half_extents);
+    let parent_tf = world.transforms[step.parent_body_idx];
+    let joint_pos = parent_tf.transform_point3(parent_anchor);
+    let child_pos = joint_pos - child_anchor; // Approximate: ignores rotation
+
+    let child_body = world.add_body_dynamic(child_half_extents);
+    world.transforms[child_body] = glam::DAffine3::from_translation(child_pos);
+    body_node_map.push((step.geno_node_idx, step.depth));
+
+    // Create joint.
+    let normal = conn.parent_face.normal();
+    let (axis_a, axis_b) = perpendicular_axes(normal);
+    let joint = match target_node.joint_type {
+        crate::joint::JointType::Rigid => Joint::rigid(step.parent_body_idx, child_body, parent_anchor, child_anchor),
+        crate::joint::JointType::Revolute => Joint::revolute(step.parent_body_idx, child_body, parent_anchor, child_anchor, axis_a),
+        crate::joint::JointType::Twist => Joint::twist(step.parent_body_idx, child_body, parent_anchor, child_anchor, normal),
+        crate::joint::JointType::Universal => Joint::universal(step.parent_body_idx, child_body, parent_anchor, child_anchor, axis_a, axis_b),
+        crate::joint::JointType::BendTwist => Joint::bend_twist(step.parent_body_idx, child_body, parent_anchor, child_anchor, axis_a, normal),
+        crate::joint::JointType::TwistBend => Joint::twist_bend(step.parent_body_idx, child_body, parent_anchor, child_anchor, normal, axis_a),
+        crate::joint::JointType::Spherical => Joint::spherical(step.parent_body_idx, child_body, parent_anchor, child_anchor),
+    };
+
+    let joint_idx = world.add_joint_dynamic(joint);
+    for dof in 0..target_node.joint_type.dof_count() {
+        world.joints[joint_idx].angle_min[dof] = target_node.joint_limit_min[dof];
+        world.joints[joint_idx].angle_max[dof] = target_node.joint_limit_max[dof];
+    }
+
+    // Record sensors.
+    for dof in 0..target_node.joint_type.dof_count() {
+        sensor_map.push(SensorInfo {
+            body_idx: child_body,
+            sensor_type: SensorType::JointAngle { joint_idx, dof },
+        });
+    }
+    for axis in 0..3 {
+        sensor_map.push(SensorInfo {
+            body_idx: child_body,
+            sensor_type: SensorType::PhotoSensor { body_idx: child_body, axis },
+        });
+    }
+
+    child_body
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -210,6 +380,7 @@ mod tests {
                 brain: BrainGraph {
                     neurons: Vec::new(),
                     effectors: Vec::new(),
+                    signal_effectors: Vec::new(),
                 },
             }],
             connections: Vec::new(),
@@ -217,6 +388,7 @@ mod tests {
             global_brain: BrainGraph {
                 neurons: Vec::new(),
                 effectors: Vec::new(),
+                signal_effectors: Vec::new(),
             },
         };
 
@@ -291,6 +463,7 @@ mod tests {
                     brain: BrainGraph {
                         neurons: Vec::new(),
                         effectors: Vec::new(),
+                        signal_effectors: Vec::new(),
                     },
                 },
                 MorphNode {
@@ -309,6 +482,7 @@ mod tests {
                             input: NeuronInput::Neuron(0),
                             weight: 1.0,
                         }],
+                        signal_effectors: Vec::new(),
                     },
                 },
             ],
@@ -324,6 +498,7 @@ mod tests {
             global_brain: BrainGraph {
                 neurons: Vec::new(),
                 effectors: Vec::new(),
+                signal_effectors: Vec::new(),
             },
         };
 

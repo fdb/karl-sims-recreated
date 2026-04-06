@@ -7,6 +7,10 @@ interface Props {
   genomeBytes: Uint8Array;
   environment?: "Water" | "Land";
   goal?: "SwimmingSpeed" | "LightFollowing";
+  /** When set to true, triggers a video export of all 600 frames as WebM. */
+  exportVideo?: boolean;
+  /** Called when the exported video blob is ready. */
+  onVideoExported?: (blob: Blob, filename: string) => void;
 }
 
 const SIM_DURATION = 10.0; // seconds
@@ -14,7 +18,7 @@ const DT = 1.0 / 60.0;
 const TOTAL_FRAMES = Math.round(SIM_DURATION / DT); // 600
 const STRIDE = 10; // values per body: px py pz qw qx qy qz hx hy hz
 
-export default function CreatureViewer({ genomeBytes, environment = "Water", goal = "SwimmingSpeed" }: Props) {
+export default function CreatureViewer({ genomeBytes, environment = "Water", goal = "SwimmingSpeed", exportVideo = false, onVideoExported }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const animIdRef = useRef<number>(0);
@@ -286,6 +290,67 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       setIsComputing(false);
       setNanFrame(firstNanFrame);
       setHasNan(firstNanFrame !== null);
+
+      // --- Video export mode ---
+      if (exportVideo) {
+        // Record the canvas at 60fps in real-time using MediaRecorder.
+        // We pace frames at ~16.67ms intervals so the resulting WebM
+        // has correct 10-second duration.
+        const canvas = renderer.domElement;
+        const stream = canvas.captureStream(60);
+        const chunks: Blob[] = [];
+        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+          ? "video/webm;codecs=vp9"
+          : "video/webm";
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: 8_000_000,
+        });
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data);
+        };
+
+        const exportDone = new Promise<Blob>((resolve) => {
+          recorder.onstop = () => {
+            resolve(new Blob(chunks, { type: "video/webm" }));
+          };
+        });
+
+        recorder.start();
+
+        // Render each frame paced at 60fps (16.67ms per frame = 10s total)
+        const frameDelay = 1000 / 60;
+        for (let f = 0; f < allFrames.length; f++) {
+          const t0 = performance.now();
+          applyTransforms(allFrames[f], meshes);
+          if (lightSphere && allLightPositions.length > 0) {
+            const lp = allLightPositions[Math.min(f, allLightPositions.length - 1)];
+            if (lp) lightSphere.position.set(lp[0], lp[1], lp[2]);
+          }
+          controls.update();
+          renderer.render(scene, camera);
+          // Wait the remainder of the frame budget so MediaRecorder sees real-time pacing
+          const elapsed = performance.now() - t0;
+          const wait = Math.max(0, frameDelay - elapsed);
+          await new Promise<void>((r) => setTimeout(r, wait));
+        }
+
+        recorder.stop();
+        const blob = await exportDone;
+
+        if (onVideoExported) {
+          onVideoExported(blob, "creature.webm");
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "creature.webm";
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        document.body.setAttribute("data-export-done", "true");
+        return; // Don't start the playback loop in export mode
+      }
 
       // --- Playback animation loop ---
       const animate = () => {

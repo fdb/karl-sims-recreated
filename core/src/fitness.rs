@@ -115,6 +115,30 @@ pub struct EvolutionParams {
     /// Default: 1.0 s.
     #[serde(default = "default_settle_duration")]
     pub settle_duration: Option<f64>,
+    /// Number of shared broadcast signal channels for inter-body neural
+    /// communication. Each creature gets this many shared float channels
+    /// that any body-part brain can read from (`NeuronInput::Signal`) or
+    /// write to (`SignalEffectorNode`).
+    ///
+    /// Sims 1994: no inter-body signals — each body part's brain was local.
+    /// Our variant: broadcast channels enable coordinated multi-segment gaits
+    /// (e.g., centipede fin-beat synchronization). Set to 0 to disable
+    /// (paper-faithful).
+    /// Default: 4.
+    #[serde(default = "default_num_signal_channels")]
+    pub num_signal_channels: usize,
+    /// Simulation frames between growth events during developmental growth.
+    /// When set, creatures start with only the root body segment and grow
+    /// one additional segment every `growth_interval` frames, following the
+    /// BFS expansion order from the genome graph.
+    ///
+    /// Sims 1994: creatures instantiated fully-formed at t=0.
+    /// Our variant: gradual growth gives complex body plans (7+ parts) time
+    /// to develop coordination before all segments are active. Set to `None`
+    /// to reproduce the paper behavior (instant full development).
+    /// Default: `None` (paper-faithful, instant development).
+    #[serde(default)]
+    pub growth_interval: Option<usize>,
 }
 
 fn default_gravity() -> f64 { 9.81 }
@@ -124,6 +148,7 @@ fn default_num_islands() -> usize { 1 }
 fn default_migration_interval() -> usize { 20 }
 fn default_min_joint_motion() -> Option<f64> { Some(0.15) }
 fn default_settle_duration() -> Option<f64> { Some(1.0) }
+fn default_num_signal_channels() -> usize { 4 }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
@@ -145,13 +170,24 @@ impl Default for EvolutionParams {
             migration_interval: 20,
             min_joint_motion: Some(0.3),
             settle_duration: Some(1.0),
+            num_signal_channels: 4,
+            growth_interval: None,
         }
     }
 }
 
 /// Evaluate fitness based on the configured goal and environment.
 pub fn evaluate_fitness(genome: &GenomeGraph, params: &EvolutionParams) -> FitnessResult {
-    let mut creature = Creature::from_genome(genome.clone());
+    let mut creature = match params.growth_interval {
+        Some(interval) if interval > 0 => {
+            Creature::from_genome_with_growth(
+                genome.clone(),
+                params.num_signal_channels,
+                interval,
+            )
+        }
+        _ => Creature::from_genome_with_signals(genome.clone(), params.num_signal_channels),
+    };
 
     // Apply environment settings.
     match params.environment {
@@ -282,6 +318,16 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     for step in 0..total_steps {
         creature.step(dt);
         let pos = creature.world.transforms[creature.world.root].translation;
+
+        // If bodies were added during growth, extend tracking arrays so
+        // per-body speed and angular-velocity checks don't index OOB.
+        while prev_body_positions.len() < creature.world.transforms.len() {
+            let idx = prev_body_positions.len();
+            prev_body_positions.push(creature.world.transforms[idx].translation);
+            prev_rotations.push(glam::DQuat::from_mat3(
+                &creature.world.transforms[idx].matrix3,
+            ));
+        }
 
         // Dynamic settle: if enabled, monitor root speed. When we've had
         // SETTLE_STABLE_FRAMES frames in a row with speed below threshold
@@ -834,6 +880,7 @@ mod tests {
             brain: BrainGraph {
                 neurons: Vec::new(),
                 effectors: Vec::new(),
+                signal_effectors: Vec::new(),
             },
         });
         // Child node with high recursion
@@ -877,6 +924,7 @@ mod tests {
             global_brain: BrainGraph {
                 neurons: Vec::new(),
                 effectors: Vec::new(),
+                signal_effectors: Vec::new(),
             },
         }
     }
@@ -1002,7 +1050,7 @@ mod tests {
                     joint_limit_max: [1.0; 3],
                     recursive_limit: 1,
                     terminal_only: false,
-                    brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+                    brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
                 },
                 MorphNode {
                     dimensions: DVec3::new(0.4, 0.3, 0.3),
@@ -1017,6 +1065,7 @@ mod tests {
                             input: effector_input,
                             weight: effector_weight,
                         }],
+                        signal_effectors: Vec::new(),
                     },
                 },
             ],
@@ -1029,7 +1078,7 @@ mod tests {
                 reflection: false,
             }],
             root: 0,
-            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
         }
     }
 
@@ -1048,6 +1097,8 @@ mod tests {
             migration_interval: 20,
             min_joint_motion,
             settle_duration: Some(1.0),
+            num_signal_channels: 0,
+            growth_interval: None,
         }
     }
 
@@ -1138,11 +1189,11 @@ mod tests {
                 joint_limit_max: [1.0; 3],
                 recursive_limit: 1,
                 terminal_only: false,
-                brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+                brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
             }],
             connections: Vec::new(),
             root: 0,
-            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
         };
 
         let mut p = land_params_with_motion(Some(0.3));
@@ -1184,7 +1235,7 @@ mod tests {
             joint_limit_max: [1.0; 3],
             recursive_limit: 1,
             terminal_only: false,
-            brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+            brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
         };
         let genome = GenomeGraph {
             nodes: vec![rigid_node(), rigid_node()],
@@ -1197,7 +1248,7 @@ mod tests {
                 reflection: false,
             }],
             root: 0,
-            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
         };
         let r_on = evaluate_fitness(&genome, &land_params_with_motion(Some(0.3)));
         assert_eq!(
@@ -1224,16 +1275,71 @@ mod tests {
                 joint_limit_max: [1.0; 3],
                 recursive_limit: 1,
                 terminal_only: false,
-                brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+                brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
             }],
             connections: Vec::new(),
             root: 0,
-            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new() },
+            global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
         };
         let p_with = land_params_with_motion(Some(0.15));
         let p_without = land_params_with_motion(None);
         let r_with = evaluate_fitness(&genome, &p_with);
         let r_without = evaluate_fitness(&genome, &p_without);
         assert!((r_with.score - r_without.score).abs() < 1e-9);
+    }
+
+    #[test]
+    fn evaluate_fitness_with_growth_does_not_panic() {
+        // Regression test: growth adds bodies mid-simulation, which used to
+        // cause an index-out-of-bounds panic in the per-body speed/angular-
+        // velocity tracking arrays (prev_body_positions, prev_rotations).
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+
+        let mut params = land_params_with_motion(Some(0.15));
+        params.growth_interval = Some(60);
+        params.num_signal_channels = 4;
+        params.sim_duration = 4.0;
+
+        // Try multiple seeds to hit multi-body creatures that actually grow.
+        for seed in 0..30u64 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let genome = GenomeGraph::random(&mut rng);
+            let result = evaluate_fitness(&genome, &params);
+            assert!(result.score.is_finite(), "seed {seed}: fitness must be finite");
+        }
+    }
+
+    #[test]
+    fn evaluate_fitness_swimming_with_growth_does_not_panic() {
+        // Same regression test but for water/swimming — the config that
+        // the Wave 3 evolutions actually use.
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+
+        let params = EvolutionParams {
+            population_size: 200,
+            max_generations: 10,
+            goal: FitnessGoal::SwimmingSpeed,
+            environment: Environment::Water,
+            sim_duration: 4.0,
+            max_parts: 20,
+            gravity: 9.81,
+            water_viscosity: 2.0,
+            max_body_angular_velocity: Some(20.0),
+            num_islands: 1,
+            migration_interval: 20,
+            min_joint_motion: Some(0.15),
+            settle_duration: Some(1.0),
+            num_signal_channels: 4,
+            growth_interval: Some(60),
+        };
+
+        for seed in 0..30u64 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let genome = GenomeGraph::random(&mut rng);
+            let result = evaluate_fitness(&genome, &params);
+            assert!(result.score.is_finite(), "seed {seed}: fitness must be finite");
+        }
     }
 }

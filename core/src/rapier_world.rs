@@ -196,6 +196,93 @@ impl RapierState {
         }
     }
 
+    /// Add a rigid body to the Rapier simulation mid-step.
+    ///
+    /// Used by the developmental growth system to add body segments
+    /// after the simulation has already started. Returns the index into
+    /// `body_handles` for the new body.
+    pub fn add_body_dynamic(
+        &mut self,
+        body: &RigidBody,
+        transform: &DAffine3,
+        water_enabled: bool,
+    ) -> usize {
+        let creature_groups = InteractionGroups::new(
+            Group::GROUP_1, Group::GROUP_2, InteractionTestMode::And,
+        );
+        let pose = affine_to_pose(transform);
+        let he = body.half_extents;
+
+        let (lin_damp, ang_damp) = if water_enabled { (2.0, 2.0) } else { (0.3, 0.5) };
+        let rb = RigidBodyBuilder::dynamic()
+            .pose(pose)
+            .linear_damping(lin_damp)
+            .angular_damping(ang_damp)
+            .build();
+        let handle = self.bodies.insert(rb);
+
+        let collider = ColliderBuilder::cuboid(he.x, he.y, he.z)
+            .density(body.mass / (he.x * he.y * he.z * 8.0))
+            .restitution(0.1)
+            .friction(0.8)
+            .collision_groups(creature_groups)
+            .build();
+        self.colliders.insert_with_parent(collider, handle, &mut self.bodies);
+
+        let idx = self.body_handles.len();
+        self.body_handles.push(handle);
+        idx
+    }
+
+    /// Add a joint to the Rapier simulation mid-step.
+    ///
+    /// Used by the developmental growth system to connect a newly-grown
+    /// body segment to its parent. Returns the index into `joint_handles`.
+    pub fn add_joint_dynamic(&mut self, joint: &Joint) -> usize {
+        let ph = self.body_handles[joint.parent_idx];
+        let ch = self.body_handles[joint.child_idx];
+
+        let handle = match joint.joint_type {
+            JointType::Rigid => {
+                let jd = FixedJointBuilder::new()
+                    .local_anchor1(joint.parent_anchor)
+                    .local_anchor2(joint.child_anchor)
+                    .build();
+                self.impulse_joints.insert(ph, ch, jd, true)
+            }
+            JointType::Revolute | JointType::Twist => {
+                let axis = joint.axis;
+                const DAMPING_SCALE: f64 = 10.0;
+                let jd = RevoluteJointBuilder::new(axis)
+                    .local_anchor1(joint.parent_anchor)
+                    .local_anchor2(joint.child_anchor)
+                    .limits([joint.angle_min[0], joint.angle_max[0]])
+                    .motor_model(MotorModel::ForceBased)
+                    .motor_velocity(0.0, joint.damping * DAMPING_SCALE)
+                    .build();
+                self.impulse_joints.insert(ph, ch, jd, true)
+            }
+            JointType::Spherical => {
+                let jd = SphericalJointBuilder::new()
+                    .local_anchor1(joint.parent_anchor)
+                    .local_anchor2(joint.child_anchor)
+                    .build();
+                self.impulse_joints.insert(ph, ch, jd, true)
+            }
+            JointType::Universal | JointType::BendTwist | JointType::TwistBend => {
+                let jd = SphericalJointBuilder::new()
+                    .local_anchor1(joint.parent_anchor)
+                    .local_anchor2(joint.child_anchor)
+                    .build();
+                self.impulse_joints.insert(ph, ch, jd, true)
+            }
+        };
+
+        let idx = self.joint_handles.len();
+        self.joint_handles.push(handle);
+        idx
+    }
+
     /// Run one physics frame of duration `dt`.
     ///
     /// Splits the frame into fixed 4 ms sub-steps (matching `Featherstone`'s

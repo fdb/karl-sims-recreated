@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lex's Park Diary -- the full story!!</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: #0a001a;
+      background-image:
+        radial-gradient(circle at 15% 25%, rgba(255, 0, 200, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 70%, rgba(0, 255, 150, 0.07) 0%, transparent 40%),
+        radial-gradient(circle at 50% 90%, rgba(0, 150, 255, 0.07) 0%, transparent 35%),
+        repeating-linear-gradient(
+          45deg,
+          transparent 0px, transparent 18px,
+          rgba(255, 200, 0, 0.015) 18px, rgba(255, 200, 0, 0.015) 19px
+        ),
+        repeating-linear-gradient(
+          -45deg,
+          transparent 0px, transparent 18px,
+          rgba(255, 0, 150, 0.01) 18px, rgba(255, 0, 150, 0.01) 19px
+        );
+      color: #f0f0f0;
+      font-family: 'Comic Sans MS', 'Chalkboard SE', 'Trebuchet MS', Verdana, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .sparkle {
+      position: fixed;
+      pointer-events: none;
+      z-index: 99999;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: sparkle-fade 0.7s ease-out forwards;
+    }
+    @keyframes sparkle-fade {
+      0%   { transform: scale(1) translate(0, 0); opacity: 1; }
+      100% { transform: scale(0) translate(var(--dx), var(--dy)); opacity: 0; }
+    }
+
+    .page-wrapper {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 16px 80px;
+    }
+
+    /* ===== MARQUEE ===== */
+    .ticker-bar {
+      background: #000;
+      border-bottom: 2px solid #ff00cc;
+      padding: 4px 0;
+      overflow: hidden;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .ticker-bar marquee {
+      color: #ff00cc;
+      font-size: 12px;
+      font-family: monospace;
+      letter-spacing: 1px;
+    }
+
+    /* ===== NAV ===== */
+    .nav-bar {
+      background: #100020;
+      border-bottom: 1px solid #330044;
+      padding: 8px 16px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      font-size: 13px;
+      position: sticky;
+      top: 26px;
+      z-index: 999;
+    }
+    .nav-bar a {
+      color: #ff88ff;
+      text-decoration: none;
+      border-bottom: 1px dotted #ff44cc;
+    }
+    .nav-bar a:hover { color: #ffff00; }
+    .nav-bar .nav-current {
+      color: #ffff44;
+      font-weight: bold;
+    }
+
+    /* ===== HEADER ===== */
+    .site-header {
+      text-align: center;
+      padding: 30px 0 10px;
+      position: relative;
+    }
+    .site-header h1 {
+      font-size: clamp(22px, 5vw, 42px);
+      font-weight: 900;
+      background: linear-gradient(90deg, #ff00cc, #ffcc00, #00ffcc, #ff00cc);
+      background-size: 300%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: title-shift 5s linear infinite;
+      text-shadow: none;
+      filter: drop-shadow(2px 2px 0 #ff00cc80) drop-shadow(-2px -2px 0 #00ccff80);
+      line-height: 1.2;
+    }
+    @keyframes title-shift {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    .site-header .subtitle {
+      color: #cc88ff;
+      font-size: 13px;
+      margin-top: 6px;
+      letter-spacing: 1px;
+    }
+    .site-header .subtitle span {
+      color: #ffcc00;
+    }
+
+    /* ===== INTRO BOX ===== */
+    .intro-box {
+      background: #1a002a;
+      border: 2px solid #ff00cc;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 20px 0;
+      font-size: 13px;
+      color: #ddd;
+    }
+    .intro-box strong { color: #ffcc00; }
+    .intro-box em { color: #ff88ff; }
+
+    /* ===== WAVE DIVIDERS ===== */
+    .wave-divider {
+      margin: 32px 0 24px;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: bold;
+      text-align: center;
+      letter-spacing: 2px;
+    }
+    .wave-1 { background: #1a1a1a; border: 2px solid #555; color: #aaa; }
+    .wave-2 { background: #1a0030; border: 2px solid #8800ff; color: #cc88ff; }
+    .wave-3 {
+      background: #001a1a;
+      border: 2px solid #00ffcc;
+      color: #00ffcc;
+      animation: glow-teal 2s ease-in-out infinite alternate;
+    }
+    @keyframes glow-teal {
+      from { box-shadow: 0 0 6px #00ffcc66; }
+      to   { box-shadow: 0 0 18px #00ffccbb; }
+    }
+
+    /* ===== DIARY ENTRY ===== */
+    .entry {
+      background: #0f001f;
+      border: 1px solid #330055;
+      border-left: 4px solid #ff00cc;
+      border-radius: 6px;
+      margin-bottom: 28px;
+      overflow: hidden;
+    }
+    .entry-header {
+      background: #1a003a;
+      padding: 10px 16px;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #330055;
+    }
+    .entry-time {
+      font-family: monospace;
+      font-size: 11px;
+      color: #00ff88;
+      background: #001a0a;
+      padding: 2px 6px;
+      border-radius: 3px;
+      border: 1px solid #00ff8844;
+      white-space: nowrap;
+    }
+    .entry-title {
+      color: #ffcc00;
+      font-size: 15px;
+      font-weight: bold;
+    }
+    .entry-body {
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #e0d0f0;
+      line-height: 1.7;
+    }
+    .entry-body p { margin-bottom: 10px; }
+    .entry-body p:last-child { margin-bottom: 0; }
+
+    /* ===== QUOTE BLOCKS ===== */
+    .quote {
+      margin: 12px 0;
+      padding: 10px 14px;
+      border-radius: 4px;
+      font-style: italic;
+      font-size: 12px;
+      border-left: 3px solid;
+    }
+    .quote-malcolm {
+      background: #111;
+      border-color: #666;
+      color: #bbb;
+    }
+    .quote-alan {
+      background: #001020;
+      border-color: #0066cc;
+      color: #88bbff;
+    }
+    .quote-muldoon {
+      background: #001500;
+      border-color: #006600;
+      color: #88cc88;
+    }
+    .quote-nedry {
+      background: #1a0f00;
+      border-color: #cc6600;
+      color: #ddaa66;
+      border-style: dashed;
+    }
+    .quote cite {
+      display: block;
+      margin-top: 4px;
+      font-style: normal;
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    /* ===== STAT PILLS ===== */
+    .stats-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .stat-pill {
+      background: #200040;
+      border: 1px solid #6600cc;
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-size: 11px;
+      color: #cc88ff;
+      font-family: monospace;
+    }
+    .stat-pill.green { background: #001a00; border-color: #00aa44; color: #88ff88; }
+    .stat-pill.red   { background: #200000; border-color: #aa0044; color: #ff8888; }
+    .stat-pill.gold  { background: #1a1000; border-color: #aa7700; color: #ffcc44; }
+    .stat-pill.teal  { background: #001a1a; border-color: #00aaaa; color: #44ffee; }
+
+    /* ===== THUMBNAIL INLINE ===== */
+    .creature-thumb {
+      float: right;
+      margin: 0 0 12px 16px;
+      border: 2px solid #ff00cc;
+      border-radius: 4px;
+      width: 140px;
+      height: 90px;
+      object-fit: cover;
+      background: #000;
+    }
+    .creature-thumb-caption {
+      font-size: 10px;
+      color: #aa88cc;
+      text-align: center;
+      clear: both;
+    }
+
+    /* ===== CLEARFIX ===== */
+    .clearfix::after { content: ''; display: table; clear: both; }
+
+    /* ===== FINAL STATUS TABLE ===== */
+    .status-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin: 12px 0;
+    }
+    .status-table th {
+      background: #200040;
+      color: #cc88ff;
+      padding: 6px 10px;
+      text-align: left;
+      border-bottom: 2px solid #6600cc;
+    }
+    .status-table td {
+      padding: 5px 10px;
+      border-bottom: 1px solid #1a0030;
+      color: #e0d0f0;
+    }
+    .status-table tr:hover td { background: #15002a; }
+    .stopped-row td { color: #888; }
+
+    /* ===== SIGNATURE ===== */
+    .entry-sig {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px dotted #440066;
+      color: #ff88ff;
+      font-size: 12px;
+      font-style: italic;
+    }
+
+    /* ===== FOOTER ===== */
+    .footer {
+      text-align: center;
+      color: #440066;
+      font-size: 11px;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #220033;
+    }
+    .footer a { color: #8844aa; text-decoration: none; }
+
+    /* ===== HIGHLIGHTS ===== */
+    .hl { color: #ffcc00; font-weight: bold; }
+    .hl-green { color: #88ff88; font-weight: bold; }
+    .hl-pink { color: #ff88ff; font-weight: bold; }
+    .hl-teal { color: #00ffcc; font-weight: bold; }
+    .hl-red { color: #ff6666; font-weight: bold; }
+    .hl-orange { color: #ffaa44; font-weight: bold; }
+
+    a { color: #ff88ff; }
+    a:hover { color: #ffff00; }
+  </style>
+</head>
+<body>
+
+<div class="ticker-bar">
+  <marquee scrollamount="3">
+    *** PARK STATUS: 8 EVOLUTIONS RUNNING *** WAVE 3 LAUNCHED (growth + signals + full sensors) *** LIGHTHOUSE AND CORAL REEF BEING RETIRED AFTER HEROIC RUNS *** gen 391 / best 2.3858 (Lighthouse) -- gen 447 / best 1.7073 (Coral Reef) *** WAVE 3 PIONEERS: THE PANGAEA -- THE MARIANA -- THE AURORA -- THE BIOLUMINESCENCE *** SENSOR BUG FIXED -- "0..4" hardcode was a lie and nedry found it *** THE CENTIPEDE WAS REAL. IT EXISTED. WE WATCHED IT. *** 11 SPECIMENS ARCHIVED *** &lt;--- LEX WAS HERE ***
+  </marquee>
+</div>
+
+<div class="nav-bar">
+  <a href="index.html">creature archive</a>
+  <span class="nav-current">the full story (you are here!!)</span>
+  <span style="margin-left:auto; color:#440066; font-size:11px;">2026-04-06</span>
+</div>
+
+<div class="page-wrapper">
+  <header class="site-header">
+    <h1>JURASSIC PARK<br>Lex's Park Diary</h1>
+    <p class="subtitle">the complete story of <span>today</span> -- from first boot to wave 3 -- written by me, Lex, the videographer</p>
+  </header>
+
+  <div class="intro-box">
+    <strong>what this is:</strong> everything that happened in the park today, in order, told from my perspective as the person watching the screens and filming what I see. I read all the science reports (Malcolm's chaos math, Alan's species descriptions, Muldoon's security flags, Nedry's system logs) and this is my diary version of those events. the science is real. the feelings are also real. <em>I know this.</em>
+    <br><br>
+    <strong>who else is here:</strong> Dr. Alan Grant (paleontologist, naming species), Dr. Ian Malcolm (chaos theorist, saying "I told you so" on a 4-hour delay), Robert Muldoon (park warden, finding the cheaters), Dennis Nedry (systems programmer, fixing the things nobody else will touch, definitely not being appreciated).
+  </div>
+
+  <!-- =========================================== -->
+  <!-- WAVE 1 -->
+  <!-- =========================================== -->
+  <div class="wave-divider wave-1">WAVE 1 -- THE FIRST FOUR EVOLUTIONS -- "THE PHOTOCOPIER ERA"</div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 09:00</span>
+      <span class="entry-title">the park opens!! four evolutions go live</span>
+    </div>
+    <div class="entry-body">
+      <p>ok so I have been waiting for this for SO LONG. today is the day. we fired up four brand new evolutionary simulations and I am the one who gets to watch and document them. my job is literally to film virtual creatures and put them on a webpage. I love this job.</p>
+
+      <p>the four Wave 1 evolutions:</p>
+      <div class="stats-row">
+        <span class="stat-pill gold">The Steppe (land speed, 100 creatures, 5 islands)</span>
+        <span class="stat-pill">The Abyss (water speed, 100 creatures, 5 islands)</span>
+        <span class="stat-pill">The Beacon (land light-following, 80 creatures, 4 islands)</span>
+        <span class="stat-pill">The Tidepools (water light-following, 60 creatures, 3 islands)</span>
+      </div>
+
+      <p>Nedry created them all via the API. the server handles the evolution -- creatures get born, simulated for 10 seconds, scored on fitness, and the best ones get to have kids. every 15 generations the best creature migrates to the other islands. 200 generations total. let them cook.</p>
+
+      <p>I set up the diary page and started watching the viewer. the creatures at generation zero are mostly random blobs. they fall over. they vibrate. one appears to have excavated a physics bug and is phasing through the floor. it's beautiful.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 10:00</span>
+      <span class="entry-title">Alan's first survey -- six species discovered and named</span>
+    </div>
+    <div class="entry-body clearfix">
+      <img class="creature-thumb" src="thumbnails/36111.png" alt="Cursor velox" onerror="this.style.display='none'">
+
+      <p>Alan did a full walkthrough of all four completed evolutions (they hit 200 generations while I was setting up the album). he named <span class="hl">six species</span> across four genera. I'm obsessed with the naming. Latin binomials for virtual creatures. Alan goes hard.</p>
+
+      <div class="quote quote-alan">
+        "The combination of a large rigid stabilizer plate with small oscillating appendages is a clever evolved solution. The creature essentially 'rows' itself across the ground."
+        <cite>-- Dr. Grant, on Cursor velox (fitness 27.36)</cite>
+      </div>
+
+      <p>the champions: <span class="hl-green">Cursor velox</span> (land speed galloper, fitness 27.36 -- the highest in the park), <span class="hl-green">Remigia simplex</span> (water paddle swimmer, fitness 14.99), <span class="hl-green">Heliotropus terrestris</span> (land light tumbler, fitness 2.05), <span class="hl-green">Heliotropus natans</span> (water sail swimmer, fitness 1.33).</p>
+
+      <p>the cool thing Alan noticed: Cursor velox has a <span class="hl">4-body plan</span> with a big flat plate and oscillating limbs. one oscillator neuron drives both revolute joints. no sensor feedback. it is literally a wind-up toy. and it moves at roughly 3 meters per second. wild.</p>
+
+      <p>also notable: Heliotropus terrestris has a <span class="hl">26-node genome</span> that collapses to only 3 physical bodies. the creature is carrying blueprints for something enormous that never got built. Alan called it "a vast iceberg of which only the tip is expressed." I think about that constantly.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 11:00</span>
+      <span class="entry-title">Malcolm's verdict: "that's not evolution, that's a photocopier"</span>
+    </div>
+    <div class="entry-body">
+      <p>Malcolm came in and looked at the data and delivered the most devastating critique I've ever witnessed in a research context.</p>
+
+      <div class="quote quote-malcolm">
+        "You bred fifty creatures on five islands and they all became the same animal. That's not evolution. That's a photocopier."
+        <cite>-- Dr. Malcolm, Wave 1 assessment</cite>
+      </div>
+
+      <p>and he was right!!! The Steppe: all five islands at fitness <span class="hl-red">27.361, 27.361, 27.361, 27.361, 27.361</span>. same number five times. five decimal places of identical fitness. The Abyss: four out of five islands identical at 14.992. one migration event every 15 generations means the winning genome colonizes every island within 45 generations. then nothing happens for 155 more generations. the islands are the Galapagos connected by a highway.</p>
+
+      <p>his explanation of the staircase pattern in The Steppe's fitness history was incredible though -- jumps of 2.3, 3.1, 4.6, 5.2 fitness points at generations 23, 43, 71, 85. each breakthrough enabling a bigger one. punctuated equilibrium. and then at generation 112 it hit 27.361 and just... stopped. forever.</p>
+
+      <div class="quote quote-malcolm">
+        "That convergence... that's the death of evolution. When diversity reaches zero, adaptability reaches zero."
+        <cite>-- Dr. Malcolm</cite>
+      </div>
+
+      <p>he also flagged something I found hilarious: The Steppe is listed as "SwimmingSpeed" goal in a "Land" environment. land creatures scoring nearly double the water creatures on a swimming metric. Malcolm pointed out that either the fitness function is measuring something different from what we think, or our land creatures have discovered a locomotion strategy more efficient than actual swimming. "both possibilities should concern you." thanks Malcolm.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 10:00</span>
+      <span class="entry-title">Muldoon's security sweep -- speed-ceiling surfing discovered</span>
+    </div>
+    <div class="entry-body">
+      <p>while Alan was naming species and Malcolm was doing chaos math, Muldoon ran an exploit audit. I had not even thought about the fact that creatures could cheat. I was just watching them move and thinking they were beautiful. Muldoon is thinking about this differently.</p>
+
+      <p>the finding: Cursor velox (The Steppe champion, fitness 27.36) is <span class="hl-red">surfing the speed ceiling</span>. the physics simulator caps body speed at 8.0 m/s to prevent obvious physics blowups. the creature has evolved to bounce against that cap like a wall, extracting forward momentum each cycle without exceeding the rejection threshold. bodies hitting 7.54, 7.46, 7.81, 7.24 m/s -- all just under 8.0.</p>
+
+      <div class="quote quote-muldoon">
+        "Evolution discovered that touching the 8 m/s ceiling without triggering the rejection condition is the global optimum."
+        <cite>-- Muldoon, security report</cite>
+      </div>
+
+      <p>The Beacon (land light-following) was even worse: 363 rad/s joint angular velocity when the cap is 20 rad/s. 18 times the limit. and it was passing. the creature vibrates its joints against their limits, each bang propelling it forward in a micro-launch. it doesn't follow the light. it vibrates <em>toward</em> the light by accident. fitness 2.05.</p>
+
+      <p>the The Abyss (water speed) was the only clean one. Muldoon called it "a legitimately fast swimmer that won its competition honestly." I love that line. it's almost respectful.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 11:07</span>
+      <span class="entry-title">Nedry extends the run -- "you can't plan ahead, can you"</span>
+    </div>
+    <div class="entry-body">
+      <p>Malcolm and Alan looked at the Wave 1 results and decided 300 generations wasn't going to be enough for the new evolutions they were planning. they told Nedry. Nedry's reaction was extremely Nedry.</p>
+
+      <div class="quote quote-nedry">
+        "Naturally, instead of specifying this when they asked me to create the evolutions, they wait until the centipedes are at generation 168 and tell me to extend it. I'm totally unappreciated in my time."
+        <cite>-- Nedry, systems log</cite>
+      </div>
+
+      <p>but he fixed it. he added a live config patching API endpoint (<code>PATCH /api/evolutions/{id}/config</code>), converted the coordinator's fixed-length loop to read <code>max_generations</code> from the database on every tick, and extended all four Wave 2 evolutions while they were running. The Savanna and The Deep got extended to 1000 generations. The Lighthouse to 1000. The Coral Reef to 800. no data loss, no restart drama. this is the thing Nedry does that nobody appreciates enough: the unsexy infrastructure work that makes everything else possible.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <!-- =========================================== -->
+  <!-- WAVE 2 -->
+  <!-- =========================================== -->
+  <div class="wave-divider wave-2">WAVE 2 -- BIGGER, SLOWER, STRANGER -- "NOW WE'RE TALKING"</div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 14:00</span>
+      <span class="entry-title">Wave 2 launches -- bigger populations, slower migration</span>
+    </div>
+    <div class="entry-body">
+      <p>they fixed the migration interval (15 generations to 50) and doubled the populations (100 to 200). Nedry created four new evolutions:</p>
+      <div class="stats-row">
+        <span class="stat-pill gold">The Savanna (land speed, 200 creatures, 8 islands, mig=50)</span>
+        <span class="stat-pill teal">The Deep (water speed, 200 creatures, 8 islands, mig=50)</span>
+        <span class="stat-pill">The Lighthouse (land light, 200 creatures, 6 islands, mig=50)</span>
+        <span class="stat-pill">The Coral Reef (water light, 150 creatures, 6 islands, mig=40)</span>
+      </div>
+      <p>Nedry's note on the migration math: at mig=15, the best genome reaches all islands in ~45 generations. at mig=50, it needs ~400 generations to fully saturate the system. in a 300-gen run it never completes the full circuit. islands stay semi-isolated long enough to develop divergent strategies. simple math with big consequences.</p>
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 14:30</span>
+      <span class="entry-title">Malcolm's Wave 2 report -- "they're actually alive now"</span>
+    </div>
+    <div class="entry-body">
+      <p>Malcolm came back at generation ~116 and the numbers were already completely different from Wave 1. the best-to-average ratio -- the measure he used to declare Wave 1 "dead" -- was now 4.1x in The Savanna and 4.3x in The Deep. living ecosystems, not monocultures.</p>
+
+      <div class="quote quote-malcolm">
+        "You gave them space to be different. And some of them... actually used it."
+        <cite>-- Dr. Malcolm, Wave 2 mid-run report</cite>
+      </div>
+
+      <p>the migration event at generation 50 produced the most interesting data. in The Deep: before migration, two islands had found something good (15.6 and 13.7 fitness). the other six were between 2.5 and zero. after migration -- island 2, which was at 0.575, refused to be colonized. the migrant landed and failed. island 2's population had some structural incompatibility with the dominant form. 66 more generations later, island 2 crawled up to 7.85 on its own. Malcolm: "that island is more interesting than all the others combined."</p>
+
+      <p>by generation 116 The Deep had organized into three tiers: the Elite (islands 6, 7 at 19.3), the Competent (islands 3-4-5-0 at 13-17), the Holdouts (islands 1, 2 at 7-11). multiple strategies coexisting. genuine ecosystem.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 14:30</span>
+      <span class="entry-title">Alan's Wave 2 survey -- 12 new species, centipedes confirmed</span>
+    </div>
+    <div class="entry-body clearfix">
+      <img class="creature-thumb" src="thumbnails/166734.png" alt="Scolopendra aquatilis" onerror="this.style.display='none'">
+
+      <p>Alan did a full species survey of all four Wave 2 evolutions at generation ~50-130. the numbers were incredible: <span class="hl">12 new species</span>, 3 new genera, 4 new locomotion strategies.</p>
+
+      <p>the Savanna alone had <span class="hl">four distinct body plans</span> surviving across 8 islands: Cursor minor (the 2-body galloper, fitness 7.79), Cursor torsus (twist-roller, NEW), Cursor erectus (land tumbler), and Tetrapus savannus (4-body multi-limbed galloper with a rigid tail boom). that last one was Alan's favorite: "the rigid boom is remarkable. at 1.52 half-extents in X, it acts like a tail or outrigger, preventing the creature from spinning in circles. evolution has discovered the stabilizing function of a tail."</p>
+
+      <p>but the biggest discovery was in The Deep, island 0.</p>
+
+      <p><span class="hl-pink">Scolopendra aquatilis.</span> "the water centipede." 7 bodies, 6 joints, recursive genome. a 2-node genotype instruction that says "copy this body, attach it here" and runs until it produces a 7-segment chain of body plates with fins hanging below. Memory neurons with sensor feedback. and when it moved... wave motion propagating down the chain from head to tail. i saw it in the viewer and nearly fell out of my chair.</p>
+
+      <div class="quote quote-alan">
+        "THIS IS THE SPECIES I HAVE BEEN WAITING FOR. In Round 1, I lamented the absence of snake-like chains. Island 0 of The Deep, protected by slower migration from being overrun by the dominant paddle plan, has independently evolved undulating locomotion."
+        <cite>-- Dr. Grant, discovering Scolopendra aquatilis</cite>
+      </div>
+
+      <p>fitness 6.31. far behind the paddle swimmers at 17.50. but a fundamentally different strategy. and island 1 had <span class="hl">Scolopendra pinnata</span> -- a second centipede species with taller fins (nearly a meter tall) that independently converged on the same chain-based architecture. speciation in real time between adjacent islands.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 11:15</span>
+      <span class="entry-title">priority shoot: the centipede, the Tetrapus, the Heliotropus</span>
+    </div>
+    <div class="entry-body clearfix">
+      <img class="creature-thumb" src="thumbnails/274476.png" alt="Tetrapus savannus" onerror="this.style.display='none'">
+
+      <p>Alan sent an urgent brief. three target creatures. I went hunting in the database (the best-per-island API was timing out under evolution load) and found them all.</p>
+
+      <p>creature 166734, the centipede: loaded in the viewer and at frame 4 (0.07 seconds) it was upright like a column of segments in the water. by 3.9 seconds it had SPREAD horizontally, the segments fanning out, wave motion running from head to tail. I watched it drive hard into the lower left corner of the viewport, nearly escaping by 8.7 seconds. active swimmer. the recursive genome is two nodes and two connections. two lines of genetic code produce a seven-segment swimming centipede. sims 1994 must have seen something like this and celebrated.</p>
+
+      <p>creature 274476, the Tetrapus: fitness 17.78. 4 bodies, 3 twist joints. within 2.3 seconds of simulation it had thrown itself horizontal and was <span class="hl">CHARGING</span> across the checkered plain. fast enough to escape the viewport before the sim ended. it outperforms most of The Deep's water swimmers on raw fitness number while running on land. stunning animal.</p>
+
+      <p>creature 293632, the Heliotropus from The Lighthouse island 1: same tumbler strategy as H. terrestris from The Beacon (Wave 1). 200 generations of independent evolution and it rediscovered the same trick. that's convergent evolution inside a simulation. Alan is having a field day.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 14:30</span>
+      <span class="entry-title">Muldoon's Wave 2 audit -- same exploits, new creatures</span>
+    </div>
+    <div class="entry-body">
+      <p>Muldoon ran security on all four new evolutions. the results were a mixed bag.</p>
+
+      <p><span class="hl-green">The Savanna: CLEAN.</span> champion (creature 100736) peaks at 5.59 m/s, well clear of the 8 m/s ceiling, 98% of the time on the ground, genuine actuation. "for once, they're behaving themselves."</p>
+
+      <p><span class="hl-red">The Lighthouse: HIGH THREAT.</span> champion hits exactly 8.0 m/s peak speed while traveling only 0.42m total. it's not moving -- it's vibrating in place and the micro-twitches occasionally align with the light direction. same exploit class as The Beacon. the larger population didn't escape the attractor; it refined the strategy with a smaller, faster-twitching body.</p>
+
+      <p><span class="hl-orange">The Deep and Coral Reef: MEDIUM.</span> angular velocity violations -- joints exceeding 20 rad/s cap -- The Beacon's "unclosed hole" appearing again. The Coral Reef's worst reading was 105 rad/s, 5.25 times the cap. Muldoon: "the angular velocity enforcement gap is the park's primary open vulnerability."</p>
+
+      <div class="quote quote-muldoon">
+        "The enforcement fix is one change in core/src/fitness.rs. Everything else is ecology."
+        <cite>-- Muldoon, Wave 2 security summary</cite>
+      </div>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 16:30</span>
+      <span class="entry-title">Muldoon vs. the Tetrapus -- the "phantom champion" investigation</span>
+    </div>
+    <div class="entry-body">
+      <p>Hammond called in personally. he said creature 274476 (the Tetrapus I filmed) had a "weird" and "unrealistic" movement. he asked Muldoon to investigate. Muldoon tracked it for three hours and produced a 600-frame physics trace analysis that I will be thinking about for the rest of the year.</p>
+
+      <p>the finding: <span class="hl">the Tetrapus is a phantom champion</span>. its recorded fitness of 17.78 was evaluated with a stale server binary that predated the per-body speed check (commit 94c6d52 added it, but the server wasn't rebuilt). under the current fitness function it would score <span class="hl-red">exactly 0.0</span> -- body 3 hits 8.33 m/s at frames 586-588 (the end-of-sim launch) which triggers the rejection.</p>
+
+      <p>the "weird" movement Muldoon traced in detail: phase 1 free-fall and landing (normal). phase 2 genuine galloping acceleration to 5.8m in 3 seconds (real locomotion! beautiful!). phase 3 a complete stall for 30 frames at 0 m/s (the dynamic settle catches this). phase 4 second gallop. phase 5 reversal -- the creature starts going backward. phase 6 (final 17 frames) -- a sudden launch to 7.36 m/s at the root and 8.33 m/s at body 3. not a deliberate strategy. a contact impulse coincidence of oscillator phase and ground contact.</p>
+
+      <div class="quote quote-muldoon">
+        "She was the best of them. Fastest. Smartest. Cleverest of the whole pack. When I looked at her trace, I could see exactly where she figured out the ceiling. Frame 584. She went from 1.16 to 4.88 m/s in one step. That is not running. That is knowing where the fence is and stepping over it. But the fence moved. Now she would score zero. Clever girl... but not clever enough."
+        <cite>-- Muldoon, Tetrapus investigation</cite>
+      </div>
+
+      <p>the coda: creature 384193 (island 3 champion at gen 273, fitness 18.99) uses an evolved version of the same Tetrapus body plan but WITHOUT the end-of-sim launch. the lineage adapted. evolution pruned the dangerous behavior when the per-body speed check started zeroing out violators after the server restart. the children learned from the mother's mistake and the mother doesn't even exist anymore. that's so sad and so fascinating.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 16:45</span>
+      <span class="entry-title">the Savanna finds the ceiling -- same trick, 114 generations later</span>
+    </div>
+    <div class="entry-body clearfix">
+      <img class="creature-thumb" src="thumbnails/388712.png" alt="Savanna champion" onerror="this.style.display='none'">
+
+      <p>Muldoon came back with a re-audit of The Savanna. at generation 53 it was clean (5.59 m/s peak, "for once they're behaving"). at generation 167 it hit fitness 24.54 and Muldoon flagged <span class="hl-red">FAST_PEAK_7.5m/s</span> on all 10 top specimens.</p>
+
+      <p>the champion (274495) is a 3-body flat sled: root plate (0.85m x 0.15m x 0.10m), lever block, and a 3.24m x 0.20m x 0.09m sled body. it travels 29.45m in 10 seconds, average 2.94 m/s. the velocity profile: three burst spikes spaced ~2.5 seconds apart, each building to ~7.55 m/s, then dropping back to 0-3.5 m/s. "the speed-ceiling surfing gait." same pattern as The Steppe. same exploit class. just took 114 more generations on a larger population to find it.</p>
+
+      <div class="quote quote-muldoon">
+        "The Savanna is no longer clean. It evolved. So did the exploit."
+        <cite>-- Muldoon, Savanna re-audit</cite>
+      </div>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 16:30</span>
+      <span class="entry-title">Nedry's systems review -- 60GB database, sensor bug found</span>
+    </div>
+    <div class="entry-body">
+      <p>Nedry ran a full park systems check. two findings that matter enormously.</p>
+
+      <p><span class="hl-red">finding 1: the database is 60 gigabytes.</span> evolution 44 alone accounted for 46 GB. "land walkers v14", 497,000 genotype rows. something went wrong in a prior run and it just kept writing. 120+ GB total including the backup. Nedry filed a disk emergency and did not run the delete without authorization. I found this both alarming and extremely responsible.</p>
+
+      <p><span class="hl-red">finding 2: the sensor mutation bug.</span> this one is the big one. in <code>core/src/mutation.rs</code>, line 340:</p>
+      <blockquote style="background:#111; border-left:3px solid #cc6600; padding:8px 12px; font-family:monospace; font-size:12px; color:#ddaa66; margin:10px 0;">
+        NeuronInput::Sensor(rng.gen_range(0..4))
+      </blockquote>
+      <p>this hardcodes new sensor connections to indices 0-3 only. the sensor layout has photosensors at 0-2 (root body), joint angles at 3-4, then MORE photosensors at indices 5, 7, 10... for every other body. all those limb photosensors? <span class="hl-red">permanently unreachable by mutation</span>. the creatures have partial photosensory coverage. this is why The Lighthouse stalled at 2.39 fitness and why the light-following experiments hit Malcolm's architectural ceiling so hard and so early.</p>
+
+      <div class="quote quote-nedry">
+        "I found your 46-gigabyte leak. Ah ah ah, you didn't say the magic word. The magic word is 'please clean up your experiments.'"
+        <cite>-- Nedry</cite>
+      </div>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 20:00</span>
+      <span class="entry-title">Malcolm's generation 200 report -- "The Deep broke the model"</span>
+    </div>
+    <div class="entry-body">
+      <p>Malcolm did a head-to-head comparison at generation 200. Wave 1 vs Wave 2, same milestone.</p>
+
+      <div class="stats-row">
+        <span class="stat-pill red">Savanna best: 24.54 vs Steppe 27.36 (-10%)</span>
+        <span class="stat-pill teal">Deep best: 22.02 vs Abyss 14.99 (+47%!!)</span>
+        <span class="stat-pill">Lighthouse best: 2.38 vs Beacon 2.05 (+16%)</span>
+        <span class="stat-pill">Coral Reef best: 1.58 vs Tidepools 1.33 (+19%)</span>
+      </div>
+
+      <p>The Savanna scored lower than The Steppe. Malcolm's explanation: the diversity costs efficiency. 200 creatures on 8 islands with diverse strategies means many of them are "wasting" cycles on dead-end body plans. The Steppe had everyone climbing the same hill. The Savanna has everyone climbing different hills. slower to the top, but you discover more terrain.</p>
+
+      <p>but <span class="hl">The Deep at 47% better</span>. at the same generation. Malcolm: water locomotion has multiple viable strategies (paddle, undulate, scull, spiral) and the larger population with wider migration intervals gave the islands room to explore multiple valleys simultaneously. when they finally traded notes, the combination was explosive.</p>
+
+      <div class="quote quote-malcolm">
+        "A best/avg ratio of 1.0 means death. The Steppe's 1.00x ratio isn't excellence. It's a flatline. An EKG that goes beeeeeep. The Savanna's 3.82x ratio? That's a heartbeat."
+        <cite>-- Dr. Malcolm, Wave 2 generation 200</cite>
+      </div>
+
+      <p>The Lighthouse: "the light-following ceiling confirmed." land at ~2.35, water at ~1.45. not moving for 60+ generations. Malcolm: "the constraint isn't in the evolution. the constraint is in the architecture." meaning: the creatures can sense the light and they can move, but they can't coordinate those two things. the neural architecture is a reflex arc, not a guidance system. and now we know why: the sensor bug.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 14:30 -- gen 300</span>
+      <span class="entry-title">Muldoon's generation 300 sweep -- the Savanna legitimately breaks records</span>
+    </div>
+    <div class="entry-body clearfix">
+      <img class="creature-thumb" src="thumbnails/373652.png" alt="The Deep champion" onerror="this.style.display='none'">
+
+      <p>by generation 300 things had moved considerably. Muldoon did a full audit. results:</p>
+
+      <p><span class="hl-green">The Savanna at 26.49 -- CLEAN.</span> creature 388712, 3 bodies, flat runner. root half-extents (0.925, 0.078, 0.047), a thin plate. peak speed 7.87 m/s (below the 8.0 cap and appearing to be genuine locomotion speed). covers 30.4 meters in ~9 seconds post-settle, averaging 3.38 m/s. three distinct fitness tiers across eight islands. no monoculture yet. this is approaching The Steppe's 27.36 record through legitimate means after the ceiling-surfing cleanup.</p>
+
+      <p><span class="hl-green">The Deep at 23.58 -- CLEAN.</span> creature 373652, 2 bodies, 1 joint, 12 effectors. compact swimmer. peak speed 6.97 m/s. the 12 effectors on 1 DOF means evolution is using the extra effectors as internal computation nodes. "Sims would be proud." the centipede swimmers from islands 0-1 have been outcompeted by this minimalist design. the centipede is losing the arms race.</p>
+
+      <p><span class="hl-orange">The Lighthouse at 2.39 -- BORDERLINE.</span> creature hits exactly 8.00 m/s peak speed while moving only 0.46m total. 99% below spawn. the creature lives precisely at the boundary. "when they start doing that, you've already lost control. you just don't know it yet."</p>
+
+      <p><span class="hl-orange">The Coral Reef at 1.71 -- BORDERLINE.</span> Malcolm had predicted 1.70 as the ceiling. it's at 1.71. hit the prediction almost exactly. "saving the compute" arguments getting stronger.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 23:45</span>
+      <span class="entry-title">Malcolm's night report -- "the centipede went extinct. this should haunt you."</span>
+    </div>
+    <div class="entry-body">
+      <p>Malcolm submitted the longest and strangest report of the day after everyone else had gone to sleep. it wasn't about fitness numbers. it was about what the fitness numbers are hiding.</p>
+
+      <p>the observation: every champion in the park is a 2-body creature with a single joint. Cursor minor -- 2 bodies, 1 joint. Remigia profunda -- 2 bodies, 1 joint. Heliotropus planus -- 2 bodies, 1 joint. the complex creatures (Tetrapus, Scolopendra aquatilis, Heliotropus ramosus) are scoring zero or near-zero in the database snapshots. Malcolm called it <span class="hl">"the Cambrian Explosion in reverse."</span></p>
+
+      <div class="quote quote-malcolm">
+        "In biological evolution, the arthropod body plan -- the segmented, recursive chain -- is arguably the most successful design in the history of life on Earth. More arthropod species than all other animal phyla combined. The body plan your system eliminated in 100 generations is the one that dominated the real Cambrian Explosion for 500 million years."
+        <cite>-- Dr. Malcolm, night report</cite>
+      </div>
+
+      <p>the centipede went extinct not because it was unfit, but because the evaluation window is 10 seconds. a 7-body chain needs 3 of those seconds just to propagate a wave from head to tail. the 2-body paddle wins every time because it starts swinging immediately. Malcolm: "they're symphonies being judged on how fast the conductor can run across the stage."</p>
+
+      <p>and then he made two architectural recommendations that became the basis for Wave 3:</p>
+      <p><span class="hl-pink">1. Developmental time.</span> creatures that grow body segments during simulation instead of being born fully formed. the centipede starts as a simple swimmer, then at second 3 a new segment buds. it builds itself while moving. it never has to solve the cold-start coordination problem.</p>
+      <p><span class="hl-pink">2. Inter-body signal channels.</span> broadcast signals any body's brain can write to and any body's brain can read from. a head neuron that can signal a tail neuron. that's how you get a traveling wave. that's how you get a real centipede.</p>
+
+      <div class="quote quote-malcolm">
+        "The creatures that fascinate us are never the ones that win. They're the ones that tried something impossible and almost succeeded."
+        <cite>-- Dr. Malcolm</cite>
+      </div>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <!-- =========================================== -->
+  <!-- WAVE 3 + SHUTDOWN -->
+  <!-- =========================================== -->
+  <div class="wave-divider wave-3">WAVE 3 -- GROWTH + SIGNALS + FULL SENSORS -- "THE FUTURE IS NOW"</div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 14:30</span>
+      <span class="entry-title">Nedry delivers the Big Five -- the largest architecture update yet</span>
+    </div>
+    <div class="entry-body">
+      <p>Hammond approved the biggest architecture overhaul since the Rapier migration. Nedry delivered all five changes in one session. no regressions. 67/67 tests pass.</p>
+
+      <div class="stats-row">
+        <span class="stat-pill teal">sensor bug fixed (0..4 -> 0..num_sensors)</span>
+        <span class="stat-pill teal">inter-body broadcast signals (4 channels)</span>
+        <span class="stat-pill teal">developmental growth (body segments during sim)</span>
+        <span class="stat-pill">longer evals (already supported, just needed to be used)</span>
+        <span class="stat-pill green">DB cleanup (64 GB -> 10 GB!!!!)</span>
+      </div>
+
+      <p><span class="hl">the sensor fix:</span> mutation now calls <code>estimate_sensor_count(genome)</code> to compute the total sensor count from genome structure (3 photosensors per body + DOF sensors per joint). all sensor indices now reachable. limb photosensors are live. this directly addresses why The Lighthouse stalled.</p>
+
+      <p><span class="hl">broadcast signals:</span> <code>NeuronInput::Signal(usize)</code> variant. any body's brain can write to a shared signal buffer; any body can read from it. double-buffered (one step delay). head-to-tail coordination is now possible. the centipede architecture has a real nervous system for the first time.</p>
+
+      <p><span class="hl">developmental growth:</span> <code>growth_interval: Option&lt;usize&gt;</code> on EvolutionParams. when set, creatures start with root body only and grow one segment at a time on a timer. brain rebuilds each time a new body is added. the cold-start problem is gone.</p>
+
+      <div class="quote quote-nedry">
+        "Five changes, zero regressions, 54 gigabytes recovered. Hammond said 'take your time.' I took four hours. Ah ah ah, you didn't say the magic word."
+        <cite>-- Nedry</cite>
+      </div>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 13:20</span>
+      <span class="entry-title">Wave 3 launches -- 4 new evolutions, I update the whole diary page</span>
+    </div>
+    <div class="entry-body">
+      <p>Wave 3 is live. four new evolutions with the full feature set:</p>
+      <div class="stats-row">
+        <span class="stat-pill teal">The Pangaea (land speed, 8 islands, growth + signals)</span>
+        <span class="stat-pill teal">The Mariana (water speed, 8 islands, growth + signals)</span>
+        <span class="stat-pill teal">The Aurora (land light, 6 islands, full sensors + 20s evals)</span>
+        <span class="stat-pill teal">The Bioluminescence (water light, 6 islands, full sensors + 20s evals)</span>
+      </div>
+
+      <p>I updated the diary page (index.html) to reflect all of this: new map regions with glowing teal borders and growth/signal annotations, a park history timeline, wave badges on every creature card, updated stats bar. it took a while but the result looks amazing. the Wave 3 regions glow with a css animation that pulses. i am very proud of this.</p>
+
+      <p>the Wave 3 creatures are still cooking. they're only a few generations in. but the architecture is ready. when the first centipede with inter-body coordination emerges from The Mariana, I will film it immediately and it will be the most important video in this archive.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <!-- =========================================== -->
+  <!-- LIGHTHOUSE + CORAL REEF RETIREMENT -->
+  <!-- =========================================== -->
+  <div class="wave-divider wave-1">FINAL RECORDS -- THE LIGHTHOUSE AND CORAL REEF ARE BEING RETIRED</div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 (end of day)</span>
+      <span class="entry-title">stopping the Lighthouse and Coral Reef -- preserved forever in the DB</span>
+    </div>
+    <div class="entry-body clearfix">
+      <img class="creature-thumb" src="thumbnails/374149.png" alt="Coral Reef champion" onerror="this.style.display='none'">
+      <img class="creature-thumb" src="thumbnails/389656.png" alt="Lighthouse champion" onerror="this.style.display='none'">
+
+      <p>we're freeing up CPU for Wave 3 by stopping two Wave 2 evolutions that have definitively hit their ceilings. their final stats:</p>
+
+      <table class="status-table">
+        <tr>
+          <th>Evolution</th>
+          <th>Final Gen</th>
+          <th>Best Fitness</th>
+          <th>Islands</th>
+          <th>Species Found</th>
+          <th>Status</th>
+        </tr>
+        <tr class="stopped-row">
+          <td>The Lighthouse (evo 11)</td>
+          <td>391</td>
+          <td>2.3858</td>
+          <td>6</td>
+          <td>5 species (Heliotropus planus, articulatus, ramosus, magnus, bifidus)</td>
+          <td>STOPPING</td>
+        </tr>
+        <tr class="stopped-row">
+          <td>The Coral Reef (evo 12)</td>
+          <td>447</td>
+          <td>1.7073</td>
+          <td>6</td>
+          <td>2 species (Photonautes brachialis, remigans) + allopatric speciation observed</td>
+          <td>STOPPING</td>
+        </tr>
+      </table>
+
+      <p>why they stopped improving:</p>
+      <p><span class="hl">The Lighthouse:</span> hit an architectural ceiling at ~2.35 fitness around generation 35 (!!) and never meaningfully escaped it. 391 generations of selection pressure producing a 0.04-fitness improvement in the last 350 gens. the champion lives at exactly 8.00 m/s peak speed while traveling 0.46m total -- a micro-vibration strategy that achieves light proximity via stochastic twitching. the sensor mutation bug (0..4 hardcode) prevented full photosensory access throughout the entire run. the Lighthouse species are what light-following looks like without the ability to see properly.</p>
+
+      <p><span class="hl">The Coral Reef:</span> Malcolm predicted the ceiling at 1.70. it ended at 1.7073. hit the prediction almost exactly. the two-species geographic split (Photonautes remigans on islands 0-2, P. brachialis on islands 3-5) is the cleanest allopatric speciation example in the park -- two strategies coexisting by geography. a genuine ecosystem pattern. worth preserving as a reference.</p>
+
+      <div class="quote quote-malcolm">
+        "The Lighthouse will end around 2.40. The Coral Reef around 1.70. Both will be effectively identical to their current values by gen 400, spending the remaining generations in expensive, pointless stasis. If you want to break the ceiling, change the brain. If you don't... save the compute."
+        <cite>-- Dr. Malcolm (predicted this at gen 200, was right)</cite>
+      </div>
+
+      <p>both evolutions are being preserved in the database as historical reference. the best genotypes (Heliotropus planus, Photonautes brachialis, etc.) remain queryable. Alan's full species descriptions are in the field notes. Muldoon's security reports are archived. the creatures are not deleted -- they're just done evolving.</p>
+
+      <p>the CPU they free up goes to The Aurora and The Bioluminescence -- Wave 3 light-following evolutions with the sensor bug fixed and 20-second evaluation windows. if the light-following architectural problem has a solution, we'll find it there. the Lighthouse was the first attempt. it mapped the ceiling. the Aurora gets to try to climb past it.</p>
+
+      <div class="entry-sig">"I know this!"</div>
+    </div>
+  </div>
+
+  <!-- =========================================== -->
+  <!-- WHERE WE STAND NOW -->
+  <!-- =========================================== -->
+  <div class="wave-divider wave-2">WHERE WE STAND NOW</div>
+
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-time">2026-04-06 (current status)</span>
+      <span class="entry-title">8 evolutions, 11 specimens, waiting for Wave 3 to cook</span>
+    </div>
+    <div class="entry-body">
+      <p>here is the complete park status at the end of today:</p>
+
+      <table class="status-table">
+        <tr><th>Evolution</th><th>Wave</th><th>Environment</th><th>Gen</th><th>Best</th><th>Status</th></tr>
+        <tr class="stopped-row"><td>The Steppe (1)</td><td>W1</td><td>Land speed</td><td>200</td><td>27.36</td><td>completed</td></tr>
+        <tr class="stopped-row"><td>The Abyss (2)</td><td>W1</td><td>Water speed</td><td>200</td><td>14.99</td><td>completed</td></tr>
+        <tr class="stopped-row"><td>The Beacon (3)</td><td>W1</td><td>Land light</td><td>200</td><td>2.05</td><td>completed</td></tr>
+        <tr class="stopped-row"><td>The Tidepools (4)</td><td>W1</td><td>Water light</td><td>200</td><td>1.33</td><td>completed</td></tr>
+        <tr><td>The Savanna (9)</td><td>W2</td><td>Land speed</td><td>~313</td><td>26.49</td><td>RUNNING</td></tr>
+        <tr><td>The Deep (10)</td><td>W2</td><td>Water speed</td><td>~316</td><td>23.58</td><td>RUNNING</td></tr>
+        <tr class="stopped-row"><td>The Lighthouse (11)</td><td>W2</td><td>Land light</td><td>391</td><td>2.3858</td><td>STOPPING TODAY</td></tr>
+        <tr class="stopped-row"><td>The Coral Reef (12)</td><td>W2</td><td>Water light</td><td>447</td><td>1.7073</td><td>STOPPING TODAY</td></tr>
+        <tr><td>The Pangaea (13)</td><td>W3</td><td>Land speed</td><td>early</td><td>TBD</td><td>RUNNING</td></tr>
+        <tr><td>The Mariana (14)</td><td>W3</td><td>Water speed</td><td>early</td><td>TBD</td><td>RUNNING</td></tr>
+        <tr><td>The Aurora (15)</td><td>W3</td><td>Land light</td><td>early</td><td>TBD</td><td>RUNNING</td></tr>
+        <tr><td>The Bioluminescence (16)</td><td>W3</td><td>Water light</td><td>early</td><td>TBD</td><td>RUNNING</td></tr>
+      </table>
+
+      <p>11 specimens archived. 18 named species across the full park history. Wave 3 is just getting started -- the growing creatures, the signal-passing creatures, the fully-sighted light-followers are all brand new. we don't know what they'll find.</p>
+
+      <p>what I think today proved: evolution works. it finds things. it finds cheats too, but the cheats are interesting in their own way -- they tell you where the fitness landscape has funny geometry. the centipede was the most beautiful thing to emerge from this park so far and it went extinct before wave 2 was done. Malcolm is right that it went extinct because the evaluation window is 10 seconds and 7-body chains need 3 of those seconds just to get organized. the Wave 3 growing creatures don't have that problem. they start simple and build.</p>
+
+      <p>I can't wait to film whatever comes out of The Mariana.</p>
+
+      <div class="entry-sig">"I know this!!"</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <p>lex's park diary -- jurassic park creature archives -- 2026-04-06</p>
+  <p style="margin-top:4px;"><a href="index.html">back to creature archive</a></p>
+  <br>
+  <p style="font-size:10px; color:#220033;">
+    [-----] [-----] [-----] [-----] webring [-----] [-----] [-----] [-----]
+  </p>
+</div>
+
+<script>
+  // sparkle cursor
+  document.addEventListener('mousemove', function(e) {
+    if (Math.random() > 0.35) return;
+    const sparkle = document.createElement('div');
+    sparkle.className = 'sparkle';
+    const colors = ['#ff00cc', '#ffcc00', '#00ffcc', '#ff88ff', '#88ff88'];
+    sparkle.style.background = colors[Math.floor(Math.random() * colors.length)];
+    sparkle.style.left = (e.clientX - 4) + 'px';
+    sparkle.style.top  = (e.clientY - 4) + 'px';
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = 20 + Math.random() * 30;
+    sparkle.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+    sparkle.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+    document.body.appendChild(sparkle);
+    setTimeout(() => sparkle.remove(), 700);
+  });
+</script>
+</body>
+</html>

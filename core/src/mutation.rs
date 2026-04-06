@@ -5,7 +5,7 @@ use rand::Rng;
 
 use crate::genotype::{
     AttachFace, BrainGraph, BrainNode, GenomeGraph, MorphConn, MorphNode,
-    NeuronFunc, NeuronInput,
+    NeuronFunc, NeuronInput, SignalEffectorNode,
 };
 use crate::joint::JointType;
 
@@ -280,7 +280,13 @@ pub fn garbage_collect(genome: &mut GenomeGraph) {
 // Brain mutation
 // ---------------------------------------------------------------------------
 
-fn mutate_brain<R: Rng>(brain: &mut BrainGraph, rng: &mut R, scale: f64) {
+fn mutate_brain<R: Rng>(
+    brain: &mut BrainGraph,
+    rng: &mut R,
+    scale: f64,
+    num_sensors: usize,
+    num_signal_channels: usize,
+) {
     let n_neurons = brain.neurons.len();
 
     // Mutate each neuron.
@@ -297,7 +303,7 @@ fn mutate_brain<R: Rng>(brain: &mut BrainGraph, rng: &mut R, scale: f64) {
 
         // With small probability, add an input.
         if rng.r#gen::<f64>() < 0.1 * scale && neuron.inputs.len() < 4 {
-            let input = random_neuron_input(rng, n_neurons);
+            let input = random_neuron_input(rng, n_neurons, num_sensors, num_signal_channels);
             let weight = rng.gen_range(-1.0..1.0);
             neuron.inputs.push((input, weight));
         }
@@ -320,11 +326,35 @@ fn mutate_brain<R: Rng>(brain: &mut BrainGraph, rng: &mut R, scale: f64) {
         effector.weight = perturb(rng, effector.weight, scale).clamp(-2.0, 2.0);
     }
 
+    // Mutate signal effectors.
+    for sig_eff in &mut brain.signal_effectors {
+        sig_eff.weight = perturb(rng, sig_eff.weight, scale).clamp(-2.0, 2.0);
+    }
+
+    // With small probability, add a signal effector (capped at 4 per node).
+    if num_signal_channels > 0
+        && rng.r#gen::<f64>() < 0.1 * scale
+        && brain.signal_effectors.len() < 4
+    {
+        let input = random_neuron_input(rng, n_neurons, num_sensors, num_signal_channels);
+        brain.signal_effectors.push(SignalEffectorNode {
+            input,
+            weight: rng.gen_range(-1.0..1.0),
+            channel: rng.gen_range(0..num_signal_channels),
+        });
+    }
+
+    // With small probability, remove a signal effector.
+    if rng.r#gen::<f64>() < 0.1 * scale && !brain.signal_effectors.is_empty() {
+        let idx = rng.gen_range(0..brain.signal_effectors.len());
+        brain.signal_effectors.swap_remove(idx);
+    }
+
     // With small probability, add a new neuron (capped at 16 per node to
     // prevent genome bloat — deeper chains add latency without benefit).
     if rng.r#gen::<f64>() < 0.1 * scale && brain.neurons.len() < 16 {
         let new_n = brain.neurons.len();
-        let input = random_neuron_input(rng, new_n);
+        let input = random_neuron_input(rng, new_n, num_sensors, num_signal_channels);
         let weight = rng.gen_range(-1.0..1.0);
         brain.neurons.push(BrainNode {
             func: random_neuron_func(rng),
@@ -333,14 +363,52 @@ fn mutate_brain<R: Rng>(brain: &mut BrainGraph, rng: &mut R, scale: f64) {
     }
 }
 
-fn random_neuron_input<R: Rng>(rng: &mut R, n_neurons: usize) -> NeuronInput {
-    if n_neurons > 0 && rng.gen_bool(0.5) {
-        NeuronInput::Neuron(rng.gen_range(0..n_neurons))
-    } else if rng.gen_bool(0.5) {
-        NeuronInput::Sensor(rng.gen_range(0..4))
-    } else {
-        NeuronInput::Constant(rng.gen_range(-2.0..2.0))
+fn random_neuron_input<R: Rng>(
+    rng: &mut R,
+    n_neurons: usize,
+    num_sensors: usize,
+    num_signal_channels: usize,
+) -> NeuronInput {
+    // Weighted random selection among available input types.
+    let mut options: Vec<u8> = Vec::with_capacity(4);
+    if n_neurons > 0 { options.push(0); } // Neuron
+    if num_sensors > 0 { options.push(1); } // Sensor
+    options.push(2); // Constant (always available)
+    if num_signal_channels > 0 { options.push(3); } // Signal
+
+    match options[rng.gen_range(0..options.len())] {
+        0 => NeuronInput::Neuron(rng.gen_range(0..n_neurons)),
+        1 => NeuronInput::Sensor(rng.gen_range(0..num_sensors)),
+        3 => NeuronInput::Signal(rng.gen_range(0..num_signal_channels)),
+        _ => NeuronInput::Constant(rng.gen_range(-2.0..2.0)),
     }
+}
+
+/// Estimate the total number of sensors a genome will produce when developed.
+///
+/// Each body gets 3 photosensors (X, Y, Z axes). Each child body also gets
+/// one joint-angle sensor per DOF of its joint type. The root body has no
+/// joint sensors. This mirrors `phenotype::develop()`.
+fn estimate_sensor_count(genome: &GenomeGraph) -> usize {
+    // Root body: 3 photosensors.
+    let mut count = 3usize;
+    // Each non-root node contributes DOF sensors + 3 photosensors.
+    // We approximate by counting all connections from BFS (same as develop),
+    // but a simpler estimate: each node (except root) contributes its joint
+    // DOFs + 3 photosensors, up to its recursive_limit instances.
+    for (i, node) in genome.nodes.iter().enumerate() {
+        if i == genome.root {
+            continue;
+        }
+        let dofs = node.joint_type.dof_count();
+        // Each instance of this node produces (dofs + 3) sensors.
+        // Use recursive_limit as the max number of instances.
+        let instances = node.recursive_limit as usize;
+        count += instances * (dofs + 3);
+    }
+    // Ensure at least 4 for backward compatibility with genomes that
+    // had hardcoded sensor indices 0..3.
+    count.max(4)
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +425,20 @@ fn random_neuron_input<R: Rng>(rng: &mut R, n_neurons: usize) -> NeuronInput {
 const MIN_MUTATION_SCALE: f64 = 0.05;
 
 /// Mutate a genome in place using the 5 operators from Sims' paper.
+///
+/// `num_signal_channels` controls how many broadcast signal channels are
+/// available for inter-body communication. Pass 0 for paper-faithful
+/// behavior (no signals).
 pub fn mutate<R: Rng>(genome: &mut GenomeGraph, rng: &mut R) {
+    mutate_with_signals(genome, rng, 0);
+}
+
+/// Mutate a genome with a specified number of signal channels available.
+pub fn mutate_with_signals<R: Rng>(
+    genome: &mut GenomeGraph,
+    rng: &mut R,
+    num_signal_channels: usize,
+) {
     let graph_size = genome.nodes.len().max(1);
     let mutation_scale = (1.0 / graph_size as f64).max(MIN_MUTATION_SCALE);
 
@@ -367,10 +448,11 @@ pub fn mutate<R: Rng>(genome: &mut GenomeGraph, rng: &mut R) {
     mutate_connections(genome, rng, mutation_scale);
     garbage_collect(genome);
 
+    let num_sensors = estimate_sensor_count(genome);
     for node in &mut genome.nodes {
-        mutate_brain(&mut node.brain, rng, mutation_scale);
+        mutate_brain(&mut node.brain, rng, mutation_scale, num_sensors, num_signal_channels);
     }
-    mutate_brain(&mut genome.global_brain, rng, mutation_scale);
+    mutate_brain(&mut genome.global_brain, rng, mutation_scale, num_sensors, num_signal_channels);
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +548,7 @@ mod tests {
             brain: BrainGraph {
                 neurons: Vec::new(),
                 effectors: Vec::new(),
+                signal_effectors: Vec::new(),
             },
         });
 

@@ -42,12 +42,23 @@ struct CreateEvolutionRequest {
     /// Joint-motion stddev threshold (radians). `None` to disable.
     /// Default: 0.3. See `EvolutionParams::min_joint_motion`.
     min_joint_motion: Option<f64>,
+    /// Number of shared broadcast signal channels for inter-body communication.
+    /// Default: 4.
+    num_signal_channels: Option<usize>,
+    /// Frames between growth events during developmental growth.
+    /// `None` for instant full development (paper-faithful).
+    growth_interval: Option<usize>,
     name: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct PatchEvolutionRequest {
     name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PatchConfigRequest {
+    max_generations: Option<usize>,
 }
 
 pub fn routes() -> Router<AppState> {
@@ -66,6 +77,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/evolutions/{id}/best_per_island",
             axum::routing::get(get_best_per_island_handler),
+        )
+        .route(
+            "/api/evolutions/{id}/config",
+            axum::routing::patch(patch_evolution_config_handler),
         )
         .route(
             "/api/evolutions/{id}/stop",
@@ -154,6 +169,8 @@ async fn create_evolution(
         min_joint_motion: req.min_joint_motion.or(Some(0.3)),
         // 1.0 s settle keeps free-fall drift out of the fitness score.
         settle_duration: Some(1.0),
+        num_signal_channels: req.num_signal_channels.unwrap_or(4),
+        growth_interval: req.growth_interval,
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
@@ -216,6 +233,30 @@ async fn patch_evolution(
     })
     .await;
     Json(serde_json::json!({"id": id, "name": name}))
+}
+
+/// PATCH /api/evolutions/{id}/config — update mutable config fields in-place.
+///
+/// Currently supports: `max_generations`. Merges the supplied fields into the
+/// stored config_json so the coordinator picks them up on its next iteration
+/// (it re-reads max_generations from the DB every generation).
+async fn patch_evolution_config_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<PatchConfigRequest>,
+) -> Json<serde_json::Value> {
+    let mut patch = serde_json::json!({});
+    if let Some(mg) = req.max_generations {
+        patch["max_generations"] = serde_json::json!(mg);
+    }
+    if patch.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        return Json(serde_json::json!({"error": "no recognised fields provided"}));
+    }
+    db_read_async("api.patch_evolution_config", state.db.clone(), move |c| {
+        db::patch_evolution_config(c, id, &patch)
+    })
+    .await;
+    Json(serde_json::json!({"id": id, "patched": req.max_generations.map(|v| serde_json::json!({"max_generations": v}))}))
 }
 
 async fn delete_evolution_handler(

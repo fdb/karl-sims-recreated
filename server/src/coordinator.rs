@@ -10,25 +10,22 @@ use tokio::sync::broadcast;
 
 use crate::db::{
     create_task, get_evolution_seed, get_evolution_status, get_evolution_full, get_genotype,
-    get_generation_fitnesses, get_generation_fitnesses_by_island, insert_genotype,
-    insert_genotype_with_fitness, pending_task_count, update_evolution, DbPool,
+    get_generation_fitnesses, get_generation_fitnesses_by_island, get_max_generations,
+    insert_genotype, insert_genotype_with_fitness, pending_task_count, update_evolution, DbPool,
 };
+use crate::timing::timed_db;
 
 /// Run a full evolution loop, persisting every generation to the database.
 pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender<String>>) {
-    let seed = {
-        let conn = db.get().expect("pool get");
-        get_evolution_seed(&conn, evo_id)
-    };
+    let seed = timed_db("coord.init", &db, |c| get_evolution_seed(c, evo_id));
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     // Read params from DB.
-    let params: EvolutionParams = {
-        let conn = db.get().expect("pool get");
-        get_evolution_full(&conn, evo_id)
+    let params: EvolutionParams = timed_db("coord.init", &db, |c| {
+        get_evolution_full(c, evo_id)
             .and_then(|(_, _, config_json, _)| serde_json::from_str(&config_json).ok())
             .unwrap_or_default()
-    };
+    });
 
     let config = EvolutionConfig {
         population_size: params.population_size,
@@ -41,19 +38,16 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
     };
 
     // Check if this evolution already has generations (resuming after server restart).
-    let start_gen = {
-        let conn = db.get().expect("pool get");
-        get_evolution_status(&conn, evo_id)
+    let start_gen = timed_db("coord.init", &db, |c| {
+        get_evolution_status(c, evo_id)
             .map(|(_, current_gen)| current_gen)
             .unwrap_or(0) as usize
-    };
+    });
 
     // Only create generation 0 if the evolution is brand new (no genotypes yet).
-    let has_genotypes = {
-        let conn = db.get().expect("pool get");
-        !get_generation_fitnesses(&conn, evo_id, 0).is_empty()
-            || pending_task_count(&conn, evo_id) > 0
-    };
+    let has_genotypes = timed_db("coord.init", &db, |c| {
+        !get_generation_fitnesses(c, evo_id, 0).is_empty() || pending_task_count(c, evo_id) > 0
+    });
 
     // Split population across islands. `num_islands=1` preserves single-pool behavior.
     let num_islands = params.num_islands.max(1);
@@ -64,15 +58,20 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             "Evolution {evo_id}: creating initial population ({} islands × {} creatures = {} total)",
             num_islands, per_island_pop, num_islands * per_island_pop,
         );
-        let conn = db.get().expect("pool get");
-        for island_id in 0..num_islands {
-            for _ in 0..per_island_pop {
-                let genome = GenomeGraph::random(&mut rng);
-                let bytes = bincode::serialize(&genome).unwrap();
-                let gid = insert_genotype(&conn, evo_id, 0, &bytes, None, island_id as i64);
-                create_task(&conn, evo_id, gid);
+        // One-off initial-population insert: holds a single connection for
+        // `num_islands × per_island_pop` write pairs. Tagged as a single
+        // "init" sample — the per-insert cost shows up under the per-gen
+        // labels below.
+        timed_db("coord.init_pop", &db, |conn| {
+            for island_id in 0..num_islands {
+                for _ in 0..per_island_pop {
+                    let genome = GenomeGraph::random(&mut rng);
+                    let bytes = bincode::serialize(&genome).unwrap();
+                    let gid = insert_genotype(conn, evo_id, 0, &bytes, None, island_id as i64);
+                    create_task(conn, evo_id, gid);
+                }
             }
-        }
+        });
     } else {
         log::info!("Evolution {evo_id}: resuming from generation {start_gen}");
         // Advance the RNG to match where we left off (approximate)
@@ -81,14 +80,23 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         }
     }
 
-    let max_generations = params.max_generations;
-    for cur_gen in start_gen..max_generations {
+    let mut cur_gen = start_gen;
+    loop {
+        // Re-read max_generations every iteration so a PATCH /config while
+        // running is picked up without a restart.
+        let max_generations = timed_db("coord.poll_max_gen", &db, |c| {
+            get_max_generations(c, evo_id).unwrap_or(params.max_generations)
+        });
+        if cur_gen >= max_generations {
+            break;
+        }
+
         // Check if the evolution has been stopped or paused.
         loop {
-            let status = {
-                let conn = db.get().expect("pool get");
-                get_evolution_status(&conn, evo_id).map(|(s, _)| s)
-            };
+            // Hot poll: runs every 500ms while paused, plus once per generation.
+            let status = timed_db("coord.poll_status", &db, |c| {
+                get_evolution_status(c, evo_id).map(|(s, _)| s)
+            });
             match status.as_deref() {
                 Some("stopped") => {
                     log::info!("Evolution {evo_id} stopped");
@@ -105,10 +113,12 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
 
         // Wait for all pending/running tasks to complete.
         loop {
-            let pending = {
-                let conn = db.get().expect("pool get");
-                pending_task_count(&conn, evo_id)
-            };
+            // Hot poll: every 200ms while workers are still running a gen.
+            // This does a COUNT(*) against `tasks` — expect sub-ms p50, watch
+            // the p99 for contention with workers' UPDATEs.
+            let pending = timed_db("coord.poll_pending", &db, |c| {
+                pending_task_count(c, evo_id)
+            });
             if pending == 0 {
                 break;
             }
@@ -121,17 +131,21 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         let mut island_individuals: Vec<Vec<(GenomeGraph, f64)>> =
             vec![Vec::new(); num_islands];
         for (island_id, bucket) in island_individuals.iter_mut().enumerate() {
-            let conn = db.get().expect("pool get");
-            let pairs = get_generation_fitnesses_by_island(
-                &conn, evo_id, island_id as i64, cur_gen as i64,
-            );
-            for (gid, fitness) in &pairs {
-                if let Some(bytes) = get_genotype(&conn, *gid) {
-                    if let Ok(genome) = bincode::deserialize(&bytes) {
-                        bucket.push((genome, *fitness));
+            // Per-island load: holds one connection across ~pop_per_island
+            // BLOB reads (`get_genotype` inside the loop). Tagging the whole
+            // block shows us how long a full generation-load takes.
+            timed_db("coord.load_gen", &db, |conn| {
+                let pairs = get_generation_fitnesses_by_island(
+                    conn, evo_id, island_id as i64, cur_gen as i64,
+                );
+                for (gid, fitness) in &pairs {
+                    if let Some(bytes) = get_genotype(conn, *gid) {
+                        if let Ok(genome) = bincode::deserialize(&bytes) {
+                            bucket.push((genome, *fitness));
+                        }
                     }
                 }
-            }
+            });
             bucket.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         }
 
@@ -189,27 +203,28 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
                 "Evolution {evo_id} Gen {cur_gen}: all zero fitness, regenerating random population"
             );
             let next_gen = cur_gen + 1;
-            let conn = db.get().expect("pool get");
-            update_evolution(&conn, evo_id, "running", next_gen as i64);
-            for island_id in 0..num_islands {
-                for _ in 0..per_island_pop {
-                    let genome = GenomeGraph::random(&mut rng);
-                    let bytes = bincode::serialize(&genome).unwrap();
-                    let gid = insert_genotype(
-                        &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
-                    );
-                    create_task(&conn, evo_id, gid);
+            timed_db("coord.regen_all_zero", &db, |conn| {
+                update_evolution(conn, evo_id, "running", next_gen as i64);
+                for island_id in 0..num_islands {
+                    for _ in 0..per_island_pop {
+                        let genome = GenomeGraph::random(&mut rng);
+                        let bytes = bincode::serialize(&genome).unwrap();
+                        let gid = insert_genotype(
+                            conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                        );
+                        create_task(conn, evo_id, gid);
+                    }
                 }
-            }
+            });
+            cur_gen += 1;
             continue;
         }
 
         // Prepare next generation.
         let next_gen = cur_gen + 1;
-        {
-            let conn = db.get().expect("pool get");
-            update_evolution(&conn, evo_id, "running", next_gen as i64);
-        }
+        timed_db("coord.update_gen", &db, |c| {
+            update_evolution(c, evo_id, "running", next_gen as i64)
+        });
 
         // ── Migration: ring topology, every `migration_interval` gens ───
         // best_of[i] = island i's elite (to be shipped to island (i+1)%N)
@@ -264,10 +279,14 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             };
             if let Some((genome, fitness)) = &migrant {
                 let bytes = bincode::serialize(genome).unwrap();
-                let conn = db.get().expect("pool get");
-                insert_genotype_with_fitness(
-                    &conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
-                );
+                // Each call is a fresh pool acquire + 2 inserts (genotype +
+                // completed-task row) in its own autocommit. This is exactly
+                // the pattern that batching-in-transaction would replace.
+                timed_db("coord.insert_survivor", &db, |c| {
+                    insert_genotype_with_fitness(
+                        c, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
+                    );
+                });
                 offspring_count += 1;
             }
 
@@ -275,10 +294,11 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             for (genome, fitness) in survivors.iter().zip(survivor_fitnesses.iter()) {
                 if offspring_count >= per_island_pop { break; }
                 let bytes = bincode::serialize(genome).unwrap();
-                let conn = db.get().expect("pool get");
-                insert_genotype_with_fitness(
-                    &conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
-                );
+                timed_db("coord.insert_survivor", &db, |c| {
+                    insert_genotype_with_fitness(
+                        c, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
+                    );
+                });
                 offspring_count += 1;
             }
 
@@ -294,11 +314,12 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
                 if offspring_count >= per_island_pop { break; }
                 let child = GenomeGraph::random(&mut rng);
                 let bytes = bincode::serialize(&child).unwrap();
-                let conn = db.get().expect("pool get");
-                let gid = insert_genotype(
-                    &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
-                );
-                create_task(&conn, evo_id, gid);
+                timed_db("coord.insert_offspring", &db, |c| {
+                    let gid = insert_genotype(
+                        c, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                    );
+                    create_task(c, evo_id, gid);
+                });
                 offspring_count += 1;
             }
 
@@ -308,37 +329,39 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
                 let child = if roll < config.asexual_ratio {
                     let parent = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
                     let mut child = parent.clone();
-                    karl_sims_core::mutation::mutate(&mut child, &mut rng);
+                    karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
                     child
                 } else if roll < config.asexual_ratio + config.crossover_ratio {
                     let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
                     let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
                     let mut child = karl_sims_core::mating::crossover(p1, p2, &mut rng);
-                    karl_sims_core::mutation::mutate(&mut child, &mut rng);
+                    karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
                     child
                 } else {
                     let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
                     let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
                     let mut child = karl_sims_core::mating::graft(p1, p2, &mut rng);
-                    karl_sims_core::mutation::mutate(&mut child, &mut rng);
+                    karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
                     child
                 };
 
                 let bytes = bincode::serialize(&child).unwrap();
-                let conn = db.get().expect("pool get");
-                let gid = insert_genotype(
-                    &conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
-                );
-                create_task(&conn, evo_id, gid);
+                timed_db("coord.insert_offspring", &db, |c| {
+                    let gid = insert_genotype(
+                        c, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                    );
+                    create_task(c, evo_id, gid);
+                });
                 offspring_count += 1;
             }
         }
+
+        cur_gen += 1;
     }
 
-    {
-        let conn = db.get().expect("pool get");
-        update_evolution(&conn, evo_id, "completed", -1);
-    }
+    timed_db("coord.init", &db, |c| {
+        update_evolution(c, evo_id, "completed", -1)
+    });
     log::info!("Evolution {evo_id} completed");
 }
 

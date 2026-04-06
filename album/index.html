@@ -1,0 +1,2257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lex's Creature Diary - Jurassic Park!!</title>
+  <style>
+    /* ===== RESET ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ===== BACKGROUND PATTERN ===== */
+    /* repeating claw marks + stars vibe */
+    body {
+      background-color: #0a001a;
+      background-image:
+        radial-gradient(circle at 15% 25%, rgba(255, 0, 200, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 70%, rgba(0, 255, 150, 0.07) 0%, transparent 40%),
+        radial-gradient(circle at 50% 90%, rgba(0, 150, 255, 0.07) 0%, transparent 35%),
+        repeating-linear-gradient(
+          45deg,
+          transparent 0px,
+          transparent 18px,
+          rgba(255, 200, 0, 0.015) 18px,
+          rgba(255, 200, 0, 0.015) 19px
+        ),
+        repeating-linear-gradient(
+          -45deg,
+          transparent 0px,
+          transparent 18px,
+          rgba(255, 0, 150, 0.01) 18px,
+          rgba(255, 0, 150, 0.01) 19px
+        );
+      color: #f0f0f0;
+      font-family: 'Comic Sans MS', 'Chalkboard SE', 'Trebuchet MS', Verdana, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      cursor: default;
+    }
+
+    /* ===== SPARKLE CURSOR EFFECT ===== */
+    .sparkle {
+      position: fixed;
+      pointer-events: none;
+      z-index: 99999;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: sparkle-fade 0.7s ease-out forwards;
+    }
+
+    @keyframes sparkle-fade {
+      0%   { transform: scale(1) translate(0, 0); opacity: 1; }
+      100% { transform: scale(0) translate(var(--dx), var(--dy)); opacity: 0; }
+    }
+
+    /* ===== PAGE WRAPPER ===== */
+    .page-wrapper {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 16px 60px;
+    }
+
+    /* ===== STARS BACKGROUND DECORATION ===== */
+    .stars-decoration {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .stars-decoration::before {
+      content: '* . * . ★ . * . ☆ . * . ★ . * . ☆ . * . ★ . * . ☆ . * . ★ . * . ☆ . * . ★ . * . ☆ . * . ★ . *';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      color: rgba(255, 220, 0, 0.12);
+      font-size: 11px;
+      letter-spacing: 4px;
+      line-height: 1.8;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    /* ===== MARQUEE BANNER ===== */
+    .news-ticker {
+      background: linear-gradient(135deg, #ff00aa, #cc0088);
+      color: #fff;
+      font-size: 12px;
+      font-weight: bold;
+      padding: 6px 0;
+      overflow: hidden;
+      white-space: nowrap;
+      position: relative;
+      z-index: 10;
+    }
+
+    .news-ticker marquee {
+      display: block;
+      letter-spacing: 0.05em;
+    }
+
+    /* ===== HEADER ===== */
+    header {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      padding: 28px 16px 20px;
+    }
+
+    .header-deco {
+      font-size: clamp(11px, 2vw, 15px);
+      color: #ffdd00;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+      animation: rainbow-text 4s linear infinite;
+    }
+
+    @keyframes rainbow-text {
+      0%   { color: #ffdd00; }
+      16%  { color: #ff88cc; }
+      33%  { color: #88ffcc; }
+      50%  { color: #88ccff; }
+      66%  { color: #ffaa44; }
+      83%  { color: #ff44aa; }
+      100% { color: #ffdd00; }
+    }
+
+    .header-title {
+      font-size: clamp(28px, 7vw, 68px);
+      font-weight: 900;
+      line-height: 1.1;
+      text-shadow:
+        3px 3px 0px #ff00aa,
+        6px 6px 0px #8800ff,
+        0 0 30px rgba(255, 100, 255, 0.5);
+      background: linear-gradient(135deg, #ffdd00, #ff88cc, #88ffff, #ffdd00);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: gradient-shift 5s ease infinite;
+    }
+
+    @keyframes gradient-shift {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .header-subtitle {
+      font-size: clamp(12px, 2vw, 16px);
+      color: #aaffcc;
+      margin-top: 8px;
+      font-style: italic;
+      text-shadow: 0 0 12px rgba(100, 255, 180, 0.6);
+    }
+
+    .header-intro {
+      margin-top: 14px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+      font-size: 13px;
+      color: #ccbbff;
+      background: rgba(80, 0, 120, 0.4);
+      border: 2px dashed #ff88cc;
+      border-radius: 8px;
+      padding: 12px 16px;
+      line-height: 1.7;
+    }
+
+    .blink {
+      animation: blinky 1.1s step-start infinite;
+    }
+
+    @keyframes blinky {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
+    }
+
+    /* ===== VISITOR INFO BAR ===== */
+    .visitor-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: rgba(0, 30, 60, 0.7);
+      border-top: 2px solid #00ffcc;
+      border-bottom: 2px solid #00ffcc;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: #00ffcc;
+      position: relative;
+      z-index: 10;
+      margin-bottom: 0;
+    }
+
+    .visitor-counter {
+      background: #001a00;
+      border: 2px inset #00ff66;
+      padding: 4px 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 15px;
+      color: #00ff66;
+      letter-spacing: 0.2em;
+      text-shadow: 0 0 8px #00ff66;
+    }
+
+    .online-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #00ff66;
+      border-radius: 50%;
+      box-shadow: 0 0 6px #00ff66;
+      animation: pulse-dot 1.5s ease-in-out infinite;
+      margin-right: 5px;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    /* ===== TOOLBAR ===== */
+    .toolbar {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(40, 0, 80, 0.6);
+      border-top: 1px solid #8844ff;
+      border-bottom: 1px solid #8844ff;
+      margin-bottom: 24px;
+    }
+
+    .specimen-count {
+      font-size: 12px;
+      color: #ffaaff;
+    }
+
+    .specimen-count strong {
+      color: #ffff00;
+      font-size: 15px;
+    }
+
+    .sort-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .sort-btn {
+      background: rgba(100, 0, 180, 0.5);
+      border: 2px solid #8844ff;
+      color: #ddaaff;
+      font-family: 'Comic Sans MS', 'Trebuchet MS', sans-serif;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 4px 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+
+    .sort-btn:hover, .sort-btn.active {
+      background: #8844ff;
+      color: #fff;
+      border-color: #ff88ff;
+      box-shadow: 0 0 10px rgba(200, 100, 255, 0.5);
+    }
+
+    /* ===== GRID ===== */
+    #grid {
+      position: relative;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 24px;
+      padding: 0 8px;
+    }
+
+    /* ===== CARD ===== */
+    .card {
+      background: linear-gradient(160deg, #12002a 0%, #0a001f 100%);
+      border: 3px solid #8844ff;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+      transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+      box-shadow: 0 4px 20px rgba(100, 0, 200, 0.3);
+    }
+
+    .card:hover {
+      transform: translateY(-4px) rotate(-0.3deg);
+      border-color: #ff44cc;
+      box-shadow:
+        0 8px 30px rgba(200, 0, 200, 0.4),
+        0 0 0 1px rgba(255, 100, 200, 0.2);
+    }
+
+    /* star in corner */
+    .card::before {
+      content: '★';
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      font-size: 18px;
+      color: #ffdd00;
+      text-shadow: 0 0 8px #ffaa00;
+      z-index: 5;
+      animation: spin-slow 8s linear infinite;
+    }
+
+    @keyframes spin-slow {
+      0%   { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* ===== MEDIA ===== */
+    .media-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .media-wrap img.thumb {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: opacity 0.3s;
+    }
+
+    .media-wrap video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .media-wrap.playing img.thumb { opacity: 0; }
+    .media-wrap.playing video     { opacity: 1; }
+
+    .no-thumb {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #554466;
+      font-size: 11px;
+      font-style: italic;
+    }
+
+    .play-hint {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 3;
+      background: rgba(0, 0, 0, 0.3);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .play-hint-inner {
+      background: rgba(255, 0, 180, 0.85);
+      color: #fff;
+      font-weight: bold;
+      font-size: 13px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      letter-spacing: 0.1em;
+      box-shadow: 0 0 15px rgba(255, 0, 150, 0.6);
+    }
+
+    .media-wrap:hover .play-hint   { opacity: 1; }
+    .media-wrap.playing .play-hint { opacity: 0; }
+
+    /* rec badge */
+    .rec-badge {
+      position: absolute;
+      top: 8px;
+      left: 10px;
+      font-size: 10px;
+      font-weight: bold;
+      color: #ff4444;
+      text-transform: uppercase;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(0,0,0,0.5);
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    .rec-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #ff4444;
+      box-shadow: 0 0 6px #ff4444;
+      animation: blinky 0.9s step-start infinite;
+    }
+
+    /* threat ribbon */
+    .threat-ribbon {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 3px;
+      z-index: 3;
+    }
+
+    .threat-ribbon.HIGH   { background: rgba(200, 0, 0, 0.8); color: #ffcccc; }
+    .threat-ribbon.MEDIUM { background: rgba(180, 100, 0, 0.8); color: #ffe8aa; }
+    .threat-ribbon.CLEAN  { background: rgba(0, 120, 0, 0.75); color: #ccffcc; }
+
+    /* ===== CARD BODY ===== */
+    .card-body {
+      padding: 14px 14px 16px;
+    }
+
+    /* creature name styled as a personal nickname */
+    .creature-nickname {
+      font-size: 17px;
+      font-weight: 900;
+      color: #ff88ee;
+      text-shadow: 1px 1px 0 #880044;
+      margin-bottom: 2px;
+      line-height: 1.2;
+    }
+
+    .creature-species {
+      font-size: 11px;
+      font-style: italic;
+      color: #aaccff;
+      margin-bottom: 4px;
+    }
+
+    .evolution-badge {
+      display: inline-block;
+      background: linear-gradient(90deg, #440088, #880044);
+      color: #ffccff;
+      font-size: 10px;
+      font-weight: bold;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      letter-spacing: 0.08em;
+    }
+
+    /* fitness and stars row */
+    .fitness-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .fitness-display {
+      font-size: 13px;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .fitness-display .fitness-num {
+      font-size: 20px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .fitness-display.high  .fitness-num { color: #00ff88; text-shadow: 0 0 10px #00ff88; }
+    .fitness-display.medium .fitness-num { color: #ffdd00; text-shadow: 0 0 8px #ffaa00; }
+    .fitness-display.low   .fitness-num { color: #ff8844; }
+    .fitness-display.bad   .fitness-num { color: #ff4444; }
+
+    .star-rating {
+      font-size: 18px;
+      letter-spacing: 1px;
+      line-height: 1;
+    }
+
+    /* meta grid */
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 12px;
+      font-size: 11px;
+      color: #aa88dd;
+      margin-bottom: 10px;
+      background: rgba(50, 0, 80, 0.4);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+
+    .meta-grid span strong {
+      color: #eeddff;
+    }
+
+    /* notes — personal Lex voice */
+    .notes-section {
+      background: rgba(20, 0, 40, 0.6);
+      border-left: 4px solid #ff44cc;
+      border-radius: 0 6px 6px 0;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #ddccff;
+      line-height: 1.65;
+    }
+
+    .notes-label {
+      font-size: 10px;
+      font-weight: bold;
+      color: #ff44cc;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 4px;
+    }
+
+    .notes-text {
+      font-style: italic;
+    }
+
+    /* locomotion tag */
+    .loco-tag {
+      display: inline-block;
+      background: rgba(0, 100, 180, 0.4);
+      border: 1px solid #4499ff;
+      color: #88ccff;
+      font-size: 10px;
+      font-weight: bold;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      letter-spacing: 0.06em;
+    }
+
+    /* timestamp */
+    .card-footer {
+      font-size: 10px;
+      color: #664488;
+      text-align: right;
+      font-style: italic;
+      border-top: 1px dashed #330044;
+      padding-top: 6px;
+      margin-top: 4px;
+    }
+
+    /* ===== UNDER CONSTRUCTION NOTE ===== */
+    .under-construction {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      padding: 10px;
+      font-size: 13px;
+      color: #ffdd00;
+      font-style: italic;
+      margin-bottom: 16px;
+    }
+
+    .under-construction span {
+      animation: blinky 1.4s step-start infinite;
+    }
+
+    /* ===== STAFF QUOTES ===== */
+    .quotes-section {
+      position: relative;
+      z-index: 10;
+      margin: 32px 8px 32px;
+      padding: 20px 16px 24px;
+      background: rgba(10, 0, 30, 0.7);
+      border: 3px double #ffdd00;
+      border-radius: 12px;
+    }
+
+    .quotes-section-title {
+      font-size: 20px;
+      font-weight: 900;
+      color: #ffdd00;
+      text-align: center;
+      margin-bottom: 6px;
+      text-shadow: 2px 2px 0 #aa4400, 0 0 15px rgba(255, 200, 0, 0.4);
+    }
+
+    .quotes-section-intro {
+      text-align: center;
+      font-size: 12px;
+      font-style: italic;
+      color: #cc99ff;
+      margin-bottom: 20px;
+    }
+
+    .quotes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .quote-card {
+      border-radius: 10px;
+      padding: 14px 14px 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .quote-card.malcolm {
+      background: rgba(10, 10, 10, 0.85);
+      border: 2px solid #444;
+      border-left: 5px solid #888;
+    }
+
+    .quote-card.muldoon {
+      background: rgba(10, 30, 10, 0.85);
+      border: 2px solid #335533;
+      border-left: 5px solid #44aa44;
+    }
+
+    .quote-card.alan {
+      background: rgba(10, 20, 40, 0.85);
+      border: 2px solid #223355;
+      border-left: 5px solid #4488ff;
+    }
+
+    .quote-card.nedry {
+      background: rgba(40, 20, 0, 0.85);
+      border: 2px dashed #886633;
+      border-left: 5px solid #ffaa33;
+    }
+
+    .quote-speaker {
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .quote-card.malcolm .quote-speaker { color: #aaaaaa; }
+    .quote-card.muldoon .quote-speaker { color: #88cc88; }
+    .quote-card.alan    .quote-speaker { color: #88aaff; }
+    .quote-card.nedry   .quote-speaker { color: #ffcc66; }
+
+    .quote-text {
+      font-size: 13px;
+      font-style: italic;
+      color: #eeeeff;
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+
+    .quote-text::before { content: '\201C'; font-size: 20px; line-height: 0; vertical-align: -6px; margin-right: 2px; opacity: 0.6; }
+    .quote-text::after  { content: '\201D'; font-size: 20px; line-height: 0; vertical-align: -6px; margin-left: 2px; opacity: 0.6; }
+
+    .quote-lex-comment {
+      font-size: 11px;
+      color: #ff88cc;
+      font-style: italic;
+      border-top: 1px dashed rgba(255, 100, 180, 0.3);
+      padding-top: 6px;
+    }
+
+    .quote-lex-comment::before { content: 'lex: '; font-weight: bold; }
+
+    @media (max-width: 640px) {
+      .quotes-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ===== EMPTY STATE ===== */
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 80px 40px;
+      border: 3px dashed #8844ff;
+      border-radius: 16px;
+      color: #664488;
+      background: rgba(40, 0, 80, 0.3);
+    }
+
+    .empty-state .big-text {
+      font-size: 28px;
+      color: #aa66ff;
+      margin-bottom: 12px;
+    }
+
+    /* ===== FOOTER ===== */
+    footer {
+      position: relative;
+      z-index: 10;
+      margin-top: 50px;
+      padding: 20px 16px;
+      text-align: center;
+      border-top: 3px dashed #8844ff;
+    }
+
+    .webring {
+      font-size: 13px;
+      color: #ffaaff;
+      margin-bottom: 10px;
+    }
+
+    .webring a, .footer-links a {
+      color: #ffdd44;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .webring a:hover, .footer-links a:hover {
+      color: #ff88cc;
+    }
+
+    .footer-links {
+      font-size: 12px;
+      color: #aa88cc;
+      margin-bottom: 8px;
+    }
+
+    .footer-fine {
+      font-size: 10px;
+      color: #553366;
+      font-style: italic;
+    }
+
+    /* ===== SCROLLBAR ===== */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #0a001a; }
+    ::-webkit-scrollbar-thumb {
+      background: linear-gradient(#ff00aa, #8800ff);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: linear-gradient(#ff44cc, #aa44ff); }
+
+    /* ===== PARK MAP ===== */
+    .park-map-section {
+      position: relative;
+      z-index: 10;
+      margin: 24px auto;
+      max-width: 1060px;
+      padding: 0 8px;
+    }
+
+    .park-map-title {
+      text-align: center;
+      font-size: clamp(18px, 4vw, 28px);
+      font-weight: 900;
+      color: #ffdd00;
+      text-shadow: 2px 2px 0 #ff00aa, 0 0 20px rgba(255,220,0,0.4);
+      margin-bottom: 12px;
+      letter-spacing: 0.04em;
+    }
+
+    .park-map-subtitle {
+      text-align: center;
+      font-size: 12px;
+      color: #ccbbff;
+      margin-bottom: 16px;
+      font-style: italic;
+    }
+
+    .park-map-container {
+      background: #d4c5a0;
+      border: 4px solid #8b7355;
+      border-radius: 8px;
+      box-shadow:
+        0 0 0 2px #5c4a2a,
+        0 4px 30px rgba(0,0,0,0.6),
+        inset 0 0 60px rgba(139,115,85,0.3);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .park-map-container::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(139,115,85,0.08) 40px, rgba(139,115,85,0.08) 41px),
+        repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(139,115,85,0.08) 40px, rgba(139,115,85,0.08) 41px);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .park-map-container::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 30% 40%, rgba(255,250,230,0.3) 0%, transparent 60%),
+                  radial-gradient(ellipse at 80% 80%, rgba(100,80,50,0.15) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .park-map-svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    /* Map text styles */
+    .map-region-label {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      font-weight: bold;
+      font-style: italic;
+      fill: #3a2a10;
+      pointer-events: none;
+    }
+
+    .map-species-label {
+      font-family: 'Courier New', monospace;
+      font-size: 7px;
+      fill: #4a3520;
+      pointer-events: none;
+    }
+
+    .map-annotation {
+      font-family: 'Comic Sans MS', 'Chalkboard SE', cursive;
+      fill: #8b2020;
+      pointer-events: none;
+    }
+
+    .map-island-dot {
+      stroke: #3a2a10;
+      stroke-width: 0.8;
+    }
+
+    .map-legend {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background: rgba(212,197,160,0.92);
+      border: 2px solid #8b7355;
+      border-radius: 4px;
+      padding: 8px 10px;
+      font-size: 10px;
+      font-family: 'Courier New', monospace;
+      color: #3a2a10;
+      z-index: 5;
+      line-height: 1.6;
+    }
+
+    .map-legend-title {
+      font-weight: bold;
+      font-size: 11px;
+      margin-bottom: 4px;
+      text-decoration: underline;
+    }
+
+    .map-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .map-legend-swatch {
+      width: 14px;
+      height: 10px;
+      border-radius: 2px;
+      border: 1px solid #5c4a2a;
+      flex-shrink: 0;
+    }
+
+    .map-compass {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 5;
+    }
+
+    /* ===== WAVE 3 MAP GLOW ===== */
+    .wave3-region .region-border {
+      filter: drop-shadow(0 0 5px rgba(0, 255, 200, 0.7)) drop-shadow(0 0 12px rgba(0, 200, 255, 0.4));
+      stroke-width: 3;
+    }
+
+    /* ===== PARK HISTORY SECTION ===== */
+    .park-history-section {
+      position: relative;
+      z-index: 10;
+      margin: 32px 8px 32px;
+      padding: 24px 20px 28px;
+      background: rgba(0, 10, 30, 0.8);
+      border: 3px double #00ffcc;
+      border-radius: 12px;
+      max-width: 1060px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .park-history-title {
+      font-size: 22px;
+      font-weight: 900;
+      color: #00ffcc;
+      text-align: center;
+      margin-bottom: 24px;
+      text-shadow: 2px 2px 0 #008866, 0 0 20px rgba(0, 255, 200, 0.4);
+      letter-spacing: 0.06em;
+    }
+
+    .history-wave {
+      margin-bottom: 20px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      border-left: 5px solid #444;
+    }
+
+    .history-wave.wave1 {
+      background: rgba(80, 80, 80, 0.25);
+      border-left-color: #888;
+      opacity: 0.75;
+    }
+
+    .history-wave.wave2 {
+      background: rgba(100, 50, 150, 0.25);
+      border-left-color: #aa66ff;
+    }
+
+    .history-wave.wave3 {
+      background: rgba(0, 80, 80, 0.35);
+      border-left-color: #00ffcc;
+      box-shadow: 0 0 20px rgba(0, 255, 200, 0.15), inset 0 0 30px rgba(0, 200, 180, 0.05);
+    }
+
+    .history-wave-header {
+      font-size: 15px;
+      font-weight: 900;
+      margin-bottom: 4px;
+    }
+
+    .history-wave.wave1 .history-wave-header { color: #aaaaaa; }
+    .history-wave.wave2 .history-wave-header { color: #cc99ff; }
+    .history-wave.wave3 .history-wave-header { color: #00ffcc; text-shadow: 0 0 10px rgba(0,255,200,0.5); }
+
+    .history-wave-result {
+      font-size: 12px;
+      font-style: italic;
+      margin-bottom: 8px;
+    }
+
+    .history-wave.wave1 .history-wave-result { color: #888; }
+    .history-wave.wave2 .history-wave-result { color: #bb88ff; }
+    .history-wave.wave3 .history-wave-result { color: #88ffee; }
+
+    .history-wave-features {
+      list-style: none;
+      font-size: 12px;
+      color: #ccffee;
+      margin-bottom: 8px;
+      padding: 0;
+    }
+
+    .history-wave-features li {
+      padding: 2px 0;
+    }
+
+    .history-quote {
+      font-size: 12px;
+      font-style: italic;
+      color: #ffdd88;
+    }
+
+    .history-quote::before { content: '\201C'; }
+    .history-quote::after  { content: '\201D'; }
+
+    /* ===== WAVE BADGE ON CARDS ===== */
+    .wave-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: bold;
+      padding: 1px 6px;
+      border-radius: 8px;
+      letter-spacing: 0.08em;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    .wave-badge.w1 { background: #333; color: #aaa; border: 1px solid #666; }
+    .wave-badge.w2 { background: rgba(80, 0, 140, 0.6); color: #cc99ff; border: 1px solid #8844ff; }
+    .wave-badge.w3 { background: rgba(0, 80, 80, 0.6); color: #00ffcc; border: 1px solid #00ccaa; text-shadow: 0 0 6px rgba(0,255,200,0.5); }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 640px) {
+      #grid { grid-template-columns: 1fr; gap: 16px; }
+      .header-title { font-size: 32px; }
+      .toolbar { flex-direction: column; align-items: flex-start; }
+      .sort-bar { gap: 4px; }
+      .sort-btn { font-size: 10px; padding: 3px 8px; }
+      .visitor-bar { flex-direction: column; gap: 8px; }
+      .meta-grid { grid-template-columns: 1fr; }
+      .header-intro { font-size: 12px; }
+      .map-legend { font-size: 8px; padding: 6px 8px; bottom: 6px; right: 6px; }
+      .map-compass { top: 6px; right: 6px; }
+    }
+
+    @media (max-width: 400px) {
+      .header-title { font-size: 26px; }
+      .card-body { padding: 10px 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- STARS -->
+<div class="stars-decoration" aria-hidden="true"></div>
+
+<!-- NEWS TICKER -->
+<div class="news-ticker">
+  <marquee behavior="scroll" direction="left" scrollamount="4">
+    &nbsp;&nbsp;&nbsp;
+    *** WAVE 3 LAUNCHED *** creatures can now GROW body segments during simulation!! &nbsp;&bull;&nbsp;
+    broadcast signals allow inter-body communication &nbsp;&bull;&nbsp;
+    sensor bug FIXED &mdash; all photoreceptors now accessible &nbsp;&bull;&nbsp;
+    4 new evolutions: The Pangaea, The Mariana, The Aurora, The Bioluminescence &nbsp;&bull;&nbsp;
+    *** LIGHTHOUSE (gen 391, best 2.3858) AND CORAL REEF (gen 447, best 1.7073) BEING RETIRED &mdash; CPU freed for Wave 3 *** &nbsp;&bull;&nbsp;
+    *** BREAKING *** centipede swimmer discovered in The Deep!! &nbsp;&bull;&nbsp;
+    NEW SPECIES found on The Savanna!! &nbsp;&bull;&nbsp;
+    The Lighthouse champion evolved TWICE independently!! &nbsp;&bull;&nbsp;
+    Remigia profunda vanishes from viewport at 2.5 seconds!! &nbsp;&bull;&nbsp;
+    The park now has 7 documented species and counting!! &nbsp;&bull;&nbsp;
+    Cursor velox is SURFING THE SPEED CEILING &mdash; Muldoon is NOT happy!! &nbsp;&bull;&nbsp;
+    *** read the full story at diary.html *** &nbsp;&bull;&nbsp;
+    *** WELCOME TO LEX'S CREATURE DIARY ***
+    &nbsp;&nbsp;&nbsp;
+  </marquee>
+</div>
+
+<!-- DIARY LINK BANNER -->
+<div style="background:#1a003a; border-bottom:3px solid #ff00cc; border-top:2px solid #ff00cc; padding:10px 16px; text-align:center; font-family:'Comic Sans MS','Chalkboard SE',Verdana,sans-serif;">
+  <a href="diary.html" style="color:#ffcc00; font-size:15px; font-weight:bold; text-decoration:none; letter-spacing:1px; text-shadow:0 0 8px #ff00cc;">
+    &#128220; READ THE FULL STORY &mdash; how the park came to life!!
+  </a>
+  <span style="color:#cc88ff; font-size:11px; display:block; margin-top:3px;">
+    Wave 1 chaos &bull; first species named &bull; Malcolm's "photocopier" verdict &bull; the centipede &bull; the Tetrapus investigation &bull; sensor bug &bull; Wave 3 launch &bull; everything
+  </span>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="header-deco">&#9733;&middot;.&middot;&#769;&#773;&middot;.&middot;&#9733; welcome to my page!! &#9733;&middot;.&middot;&#769;&#773;&middot;.&middot;&#9733;</div>
+  <div class="header-title">LEX'S CREATURE DIARY</div>
+  <div class="header-subtitle">
+    &#127990; documenting the coolest creatures in jurassic park!! &#127990;
+  </div>
+  <div class="header-intro">
+    hi!! i'm lex and i work at jurassic park as the videographer / tech person (i know this!! &#128187;)
+    i film all the creatures the AI evolves and put them here so everyone can see how AMAZING they are.
+    some are gorgeous. some are complete disasters. i love them all.
+    <br><br>
+    <span class="blink">&#9733;</span>
+    last updated: <strong>2026-04-06</strong> &mdash;
+    <em>more creatures coming soon!! &#x1F6A7;</em>
+    <span class="blink">&#9733;</span>
+  </div>
+</header>
+
+<!-- VISITOR BAR -->
+<div class="visitor-bar">
+  <div>
+    <span class="online-dot"></span>
+    systems online
+  </div>
+  <div>
+    you are visitor:
+    <span class="visitor-counter" id="visitor-counter">&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;</span>
+  </div>
+  <div id="clock-display" style="font-family:'Courier New',monospace;letter-spacing:0.1em;">--:--:-- UTC</div>
+  <div id="specimen-count-meta" style="color:#ffdd00;font-weight:bold;">-- specimens documented</div>
+  <div style="color:#00ffcc;font-weight:bold;">8 evolutions running</div>
+  <div style="color:#ff88cc;font-weight:bold;">3 waves</div>
+</div>
+
+<!-- PARK MAP -->
+<div class="park-map-section">
+  <div class="park-map-title">PARK MAP -- where everything lives!!</div>
+  <div class="park-map-subtitle">
+    the complete archipelago of Jurassic Park's evolutionary regions ~ hand-charted by yours truly
+  </div>
+  <div class="park-map-container">
+    <svg class="park-map-svg" viewBox="0 0 900 820" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <!-- Water pattern -->
+        <pattern id="water-pattern" x="0" y="0" width="60" height="20" patternUnits="userSpaceOnUse">
+          <path d="M0 10 Q15 5, 30 10 Q45 15, 60 10" fill="none" stroke="rgba(70,130,180,0.15)" stroke-width="1"/>
+          <path d="M0 18 Q15 13, 30 18 Q45 23, 60 18" fill="none" stroke="rgba(70,130,180,0.1)" stroke-width="0.8"/>
+        </pattern>
+        <!-- Contour pattern for land -->
+        <pattern id="contour-pattern" x="0" y="0" width="30" height="30" patternUnits="userSpaceOnUse">
+          <circle cx="15" cy="15" r="8" fill="none" stroke="rgba(90,70,40,0.06)" stroke-width="0.5"/>
+          <circle cx="15" cy="15" r="14" fill="none" stroke="rgba(90,70,40,0.04)" stroke-width="0.5"/>
+        </pattern>
+        <!-- Dashed stroke for completed evos -->
+        <style>
+          .completed-region { opacity: 0.55; }
+          .completed-region .region-border { stroke-dasharray: 6 4; }
+          .active-region .region-border { stroke-width: 2.5; }
+        </style>
+      </defs>
+
+      <!-- Ocean background -->
+      <rect width="900" height="820" fill="#c8d8e8" rx="0"/>
+      <rect width="900" height="820" fill="url(#water-pattern)"/>
+
+      <!-- Scattered wave marks in open water -->
+      <g opacity="0.3" fill="none" stroke="#7090a8" stroke-width="0.6">
+        <path d="M50 350 Q60 345, 70 350 Q80 355, 90 350"/>
+        <path d="M750 100 Q760 95, 770 100 Q780 105, 790 100"/>
+        <path d="M400 530 Q410 525, 420 530 Q430 535, 440 530"/>
+        <path d="M120 150 Q130 145, 140 150"/>
+        <path d="M680 450 Q690 445, 700 450 Q710 455, 720 450"/>
+        <path d="M250 50 Q260 45, 270 50"/>
+        <path d="M820 300 Q830 295, 840 300"/>
+      </g>
+
+      <!-- ==================== -->
+      <!-- COMPLETED EVOLUTIONS -->
+      <!-- ==================== -->
+
+      <!-- THE STEPPE (evo 1) - small island cluster, top-left -->
+      <g class="completed-region" transform="translate(60, 40)">
+        <path class="region-border" d="M0 25 Q5 0, 30 5 Q60 -5, 80 10 Q95 20, 90 40 Q85 60, 60 65 Q30 70, 10 55 Q-5 45, 0 25Z"
+              fill="#a8b87a" stroke="#5a6b3a" stroke-width="1.8"/>
+        <path d="M0 25 Q5 0, 30 5 Q60 -5, 80 10 Q95 20, 90 40 Q85 60, 60 65 Q30 70, 10 55 Q-5 45, 0 25Z"
+              fill="url(#contour-pattern)"/>
+        <!-- 5 island dots, all same species -->
+        <circle cx="20" cy="25" r="3.5" fill="#8a9a5a" class="map-island-dot"/>
+        <circle cx="40" cy="15" r="3.5" fill="#8a9a5a" class="map-island-dot"/>
+        <circle cx="55" cy="30" r="3.5" fill="#8a9a5a" class="map-island-dot"/>
+        <circle cx="70" cy="25" r="3.5" fill="#8a9a5a" class="map-island-dot"/>
+        <circle cx="45" cy="48" r="3.5" fill="#8a9a5a" class="map-island-dot"/>
+        <text class="map-region-label" x="45" y="-5" text-anchor="middle" font-size="10">The Steppe</text>
+        <text class="map-species-label" x="45" y="82" text-anchor="middle" font-size="6.5" opacity="0.8">C. velox (all 5 islands)</text>
+      </g>
+
+      <!-- THE ABYSS (evo 2) - small deep water region, top-left ocean -->
+      <g class="completed-region" transform="translate(30, 130)">
+        <path class="region-border" d="M5 20 Q10 0, 35 5 Q55 2, 65 15 Q72 30, 60 45 Q45 55, 25 50 Q5 45, 5 20Z"
+              fill="#6088a8" stroke="#3a5a78" stroke-width="1.8"/>
+        <!-- 5 island dots -->
+        <circle cx="20" cy="18" r="3" fill="#5078a0" class="map-island-dot"/>
+        <circle cx="38" cy="12" r="3" fill="#5078a0" class="map-island-dot"/>
+        <circle cx="52" cy="22" r="3" fill="#5078a0" class="map-island-dot"/>
+        <circle cx="45" cy="38" r="3" fill="#5078a0" class="map-island-dot"/>
+        <circle cx="25" cy="35" r="3" fill="#5078a0" class="map-island-dot"/>
+        <text class="map-region-label" x="35" y="-3" text-anchor="middle" font-size="9">The Abyss</text>
+        <text class="map-species-label" x="35" y="64" text-anchor="middle" font-size="6.5" opacity="0.8">R. simplex</text>
+      </g>
+
+      <!-- THE BEACON (evo 3) - small island, mid-left -->
+      <g class="completed-region" transform="translate(20, 240)">
+        <path class="region-border" d="M5 15 Q15 -2, 40 5 Q58 8, 55 28 Q52 48, 30 50 Q8 48, 5 15Z"
+              fill="#c8b868" stroke="#8a8038" stroke-width="1.8"/>
+        <path d="M5 15 Q15 -2, 40 5 Q58 8, 55 28 Q52 48, 30 50 Q8 48, 5 15Z"
+              fill="url(#contour-pattern)"/>
+        <!-- lighthouse icon -->
+        <line x1="30" y1="10" x2="30" y2="22" stroke="#8a6020" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="30" cy="8" r="3" fill="#ffdd00" stroke="#aa8800" stroke-width="0.8" opacity="0.7"/>
+        <!-- 4 island dots -->
+        <circle cx="15" cy="20" r="3" fill="#b0a050" class="map-island-dot"/>
+        <circle cx="35" cy="30" r="3" fill="#b0a050" class="map-island-dot"/>
+        <circle cx="20" cy="40" r="3" fill="#b0a050" class="map-island-dot"/>
+        <circle cx="45" cy="22" r="3" fill="#b0a050" class="map-island-dot"/>
+        <text class="map-region-label" x="30" y="-5" text-anchor="middle" font-size="9">The Beacon</text>
+      </g>
+
+      <!-- THE TIDEPOOLS (evo 4) - small coastal area, bottom-left -->
+      <g class="completed-region" transform="translate(40, 330)">
+        <path class="region-border" d="M5 12 Q12 0, 35 5 Q50 8, 48 25 Q44 40, 25 42 Q5 38, 5 12Z"
+              fill="#78b8b8" stroke="#3a8888" stroke-width="1.8"/>
+        <!-- 3 island dots -->
+        <circle cx="18" cy="15" r="3" fill="#60a0a0" class="map-island-dot"/>
+        <circle cx="35" cy="13" r="3" fill="#60a0a0" class="map-island-dot"/>
+        <circle cx="28" cy="30" r="3" fill="#60a0a0" class="map-island-dot"/>
+        <text class="map-region-label" x="27" y="-3" text-anchor="middle" font-size="9">The Tidepools</text>
+      </g>
+
+      <!-- Annotation for completed regions -->
+      <g class="map-annotation" transform="translate(130, 90)">
+        <text font-size="9" transform="rotate(-8)">completed regions --&gt;</text>
+        <text font-size="8" transform="rotate(-8) translate(0, 12)" opacity="0.7">(historical sites, faded)</text>
+      </g>
+
+      <!-- ================= -->
+      <!-- ACTIVE EVOLUTIONS -->
+      <!-- ================= -->
+
+      <!-- THE SAVANNA (evo 9) - large landmass, center-top -->
+      <g class="active-region" transform="translate(250, 40)">
+        <path class="region-border"
+              d="M10 50 Q0 20, 40 10 Q80 -5, 140 8 Q190 15, 220 35 Q245 55, 235 90
+                 Q225 120, 190 135 Q150 148, 100 145 Q50 140, 20 115 Q0 90, 10 50Z"
+              fill="#7aa858" stroke="#4a6830" stroke-width="2.5"/>
+        <path d="M10 50 Q0 20, 40 10 Q80 -5, 140 8 Q190 15, 220 35 Q245 55, 235 90
+                 Q225 120, 190 135 Q150 148, 100 145 Q50 140, 20 115 Q0 90, 10 50Z"
+              fill="url(#contour-pattern)"/>
+        <!-- Inner contour line -->
+        <path d="M40 55 Q35 30, 70 25 Q110 15, 150 25 Q185 35, 200 55 Q210 75, 200 95
+                 Q185 110, 150 118 Q110 122, 70 115 Q40 105, 40 55Z"
+              fill="none" stroke="rgba(90,70,40,0.12)" stroke-width="0.8"/>
+        <!-- 8 islands -->
+        <circle cx="40" cy="40" r="5" fill="#6a9848" class="map-island-dot"><title>Island 0</title></circle>
+        <circle cx="80" cy="25" r="5" fill="#6a9848" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="120" cy="20" r="5" fill="#6a9848" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="165" cy="30" r="5" fill="#6a9848" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="200" cy="55" r="5" fill="#6a9848" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="190" cy="95" r="5" fill="#6a9848" class="map-island-dot"><title>Island 5</title></circle>
+        <circle cx="130" cy="115" r="5" fill="#6a9848" class="map-island-dot"><title>Island 6</title></circle>
+        <circle cx="65" cy="100" r="5" fill="#6a9848" class="map-island-dot"><title>Island 7</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="40" y="37" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">0</text>
+        <text class="map-species-label" x="80" y="22" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">1</text>
+        <text class="map-species-label" x="120" y="17" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">2</text>
+        <text class="map-species-label" x="165" y="27" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">3</text>
+        <text class="map-species-label" x="200" y="52" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">4</text>
+        <text class="map-species-label" x="190" y="92" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">5</text>
+        <text class="map-species-label" x="130" y="112" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">6</text>
+        <text class="map-species-label" x="65" y="97" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">7</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="120" y="-12" text-anchor="middle" font-size="14">The Savanna</text>
+        <text class="map-species-label" x="120" y="-2" text-anchor="middle" font-size="7" fill="#3a5520">Land/Speed ~ gen ~295</text>
+        <!-- Species labels -->
+        <text class="map-species-label" x="40" y="55" text-anchor="middle">C. minor</text>
+        <text class="map-species-label" x="80" y="40" text-anchor="middle">C. torsus</text>
+        <text class="map-species-label" x="165" y="46" text-anchor="middle">C. erectus</text>
+        <text class="map-species-label" x="130" y="130" text-anchor="middle">T. savannus</text>
+        <!-- Grass tufts decoration -->
+        <g stroke="#5a8838" stroke-width="0.8" stroke-linecap="round" opacity="0.4">
+          <line x1="95" y1="70" x2="93" y2="63"/><line x1="97" y1="70" x2="99" y2="63"/>
+          <line x1="155" y1="80" x2="153" y2="73"/><line x1="157" y1="80" x2="159" y2="73"/>
+          <line x1="55" y1="75" x2="53" y2="68"/><line x1="57" y1="75" x2="59" y2="68"/>
+        </g>
+      </g>
+
+      <!-- Annotation: Tetrapus -->
+      <g class="map-annotation" transform="translate(340, 200)">
+        <text font-size="8" transform="rotate(5)">4-body galloper w/ tail!!</text>
+        <line x1="40" y1="-5" x2="130" y2="-30" stroke="#8b2020" stroke-width="0.8" stroke-dasharray="3 2" marker-end="none"/>
+        <path d="M130 -30 L126 -28 L128 -33Z" fill="#8b2020"/>
+      </g>
+
+      <!-- THE DEEP (evo 10) - large ocean region, center -->
+      <g class="active-region" transform="translate(260, 250)">
+        <path class="region-border"
+              d="M15 55 Q5 20, 50 8 Q100 -8, 160 5 Q210 15, 240 45 Q258 75, 245 110
+                 Q230 145, 185 158 Q130 168, 75 160 Q25 148, 10 110 Q-2 80, 15 55Z"
+              fill="#4878a8" stroke="#2a4a78" stroke-width="2.5"/>
+        <!-- Wave marks inside -->
+        <g opacity="0.2" fill="none" stroke="#8ab0d0" stroke-width="0.6">
+          <path d="M60 60 Q75 55, 90 60 Q105 65, 120 60"/>
+          <path d="M100 100 Q115 95, 130 100 Q145 105, 160 100"/>
+          <path d="M40 110 Q55 105, 70 110"/>
+          <path d="M150 50 Q165 45, 180 50"/>
+        </g>
+        <!-- 8 islands -->
+        <circle cx="45" cy="40" r="5" fill="#3868a0" class="map-island-dot"><title>Island 0</title></circle>
+        <circle cx="90" cy="25" r="5" fill="#3868a0" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="140" cy="20" r="5" fill="#3868a0" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="190" cy="35" r="5" fill="#3868a0" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="215" cy="70" r="5" fill="#3868a0" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="200" cy="115" r="5" fill="#3868a0" class="map-island-dot"><title>Island 5</title></circle>
+        <circle cx="140" cy="135" r="5" fill="#3868a0" class="map-island-dot"><title>Island 6</title></circle>
+        <circle cx="70" cy="125" r="5" fill="#3868a0" class="map-island-dot"><title>Island 7</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="45" y="37" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">0</text>
+        <text class="map-species-label" x="90" y="22" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">1</text>
+        <text class="map-species-label" x="140" y="17" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">2</text>
+        <text class="map-species-label" x="190" y="32" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">3</text>
+        <text class="map-species-label" x="215" y="67" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">4</text>
+        <text class="map-species-label" x="200" y="112" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">5</text>
+        <text class="map-species-label" x="140" y="132" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">6</text>
+        <text class="map-species-label" x="70" y="122" text-anchor="middle" font-size="6" fill="#d0e0ff" font-weight="bold">7</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="130" y="-14" text-anchor="middle" font-size="14" fill="#1a3a5a">The Deep</text>
+        <text class="map-species-label" x="130" y="-4" text-anchor="middle" font-size="7" fill="#2a4a6a">Water/Speed ~ gen ~299</text>
+        <!-- Species labels -->
+        <text class="map-species-label" x="45" y="55" text-anchor="middle" fill="#c0d8f0" font-size="7.5" font-weight="bold">S. aquatilis</text>
+        <text class="map-species-label" x="90" y="40" text-anchor="middle" fill="#c0d8f0">S. pinnata</text>
+        <text class="map-species-label" x="170" y="50" text-anchor="middle" fill="#a0c0e0">R. profunda</text>
+        <text class="map-species-label" x="140" y="152" text-anchor="middle" fill="#a0c0e0">R. profunda</text>
+      </g>
+
+      <!-- Centipede annotation!! -->
+      <g class="map-annotation" transform="translate(220, 285)">
+        <text font-size="10" font-weight="bold" transform="rotate(-12)">HERE BE</text>
+        <text font-size="10" font-weight="bold" transform="rotate(-12) translate(0, 13)">CENTIPEDES!!</text>
+        <line x1="75" y1="0" x2="88" y2="5" stroke="#8b2020" stroke-width="1" stroke-dasharray="3 2"/>
+        <path d="M88 5 L84 3 L86 8Z" fill="#8b2020"/>
+      </g>
+
+      <!-- Centipede icon near island 0 of The Deep -->
+      <g transform="translate(295, 280)">
+        <text font-size="14">&#x1F41B;</text>
+      </g>
+
+      <!-- THE LIGHTHOUSE (evo 11) - rocky landmass, right side -->
+      <g class="active-region" transform="translate(580, 50)">
+        <path class="region-border"
+              d="M10 40 Q5 10, 45 5 Q90 -5, 130 10 Q160 25, 170 55 Q178 85, 165 120
+                 Q150 150, 110 160 Q70 170, 35 155 Q5 135, 0 100 Q-5 65, 10 40Z"
+              fill="#b8a858" stroke="#887830" stroke-width="2.5"/>
+        <path d="M10 40 Q5 10, 45 5 Q90 -5, 130 10 Q160 25, 170 55 Q178 85, 165 120
+                 Q150 150, 110 160 Q70 170, 35 155 Q5 135, 0 100 Q-5 65, 10 40Z"
+              fill="url(#contour-pattern)"/>
+        <!-- Inner contour -->
+        <path d="M30 50 Q30 25, 60 20 Q95 12, 120 25 Q145 40, 150 65 Q155 90, 145 115
+                 Q130 135, 100 142 Q65 148, 45 135 Q22 118, 20 90 Q18 65, 30 50Z"
+              fill="none" stroke="rgba(90,70,40,0.1)" stroke-width="0.8"/>
+        <!-- Lighthouse icon at top -->
+        <line x1="88" y1="18" x2="88" y2="38" stroke="#8a6020" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="88" cy="14" r="5" fill="#ffdd00" stroke="#aa8800" stroke-width="1">
+          <animate attributeName="opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite"/>
+        </circle>
+        <!-- Light rays -->
+        <g stroke="#ffdd00" stroke-width="0.5" opacity="0.3">
+          <line x1="88" y1="14" x2="70" y2="5"/>
+          <line x1="88" y1="14" x2="106" y2="5"/>
+          <line x1="88" y1="14" x2="65" y2="14"/>
+          <line x1="88" y1="14" x2="111" y2="14"/>
+        </g>
+        <!-- 6 islands -->
+        <circle cx="35" cy="55" r="5" fill="#a89848" class="map-island-dot"><title>Island 0</title></circle>
+        <circle cx="75" cy="45" r="5" fill="#a89848" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="130" cy="50" r="5" fill="#a89848" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="145" cy="95" r="5" fill="#a89848" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="100" cy="130" r="5" fill="#a89848" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="45" cy="120" r="5" fill="#a89848" class="map-island-dot"><title>Island 5</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="35" y="52" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">0</text>
+        <text class="map-species-label" x="75" y="42" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">1</text>
+        <text class="map-species-label" x="130" y="47" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">2</text>
+        <text class="map-species-label" x="145" y="92" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">3</text>
+        <text class="map-species-label" x="100" y="127" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">4</text>
+        <text class="map-species-label" x="45" y="117" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">5</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="88" y="-10" text-anchor="middle" font-size="14">The Lighthouse</text>
+        <text class="map-species-label" x="88" y="0" text-anchor="middle" font-size="7" fill="#5a5020">Land/Light ~ gen ~366</text>
+        <!-- Species labels -->
+        <text class="map-species-label" x="35" y="70" text-anchor="middle">H. planus</text>
+        <text class="map-species-label" x="75" y="60" text-anchor="middle">H. articulatus</text>
+        <text class="map-species-label" x="145" y="65" text-anchor="middle">H. ramosus</text>
+        <text class="map-species-label" x="145" y="110" text-anchor="middle">H. magnus</text>
+        <text class="map-species-label" x="45" y="138" text-anchor="middle">H. bifidus</text>
+      </g>
+
+      <!-- Annotation: 5 species! -->
+      <g class="map-annotation" transform="translate(770, 130)">
+        <text font-size="8" transform="rotate(6)">5 distinct species</text>
+        <text font-size="8" transform="rotate(6) translate(0, 11)">on one island!!</text>
+        <text font-size="8" transform="rotate(6) translate(0, 22)">convergent evolution</text>
+        <text font-size="8" transform="rotate(6) translate(0, 33)">is NOT happening here</text>
+      </g>
+
+      <!-- THE CORAL REEF (evo 12) - ocean region, bottom-right -->
+      <g class="active-region" transform="translate(560, 310)">
+        <path class="region-border"
+              d="M15 45 Q10 15, 55 5 Q105 -8, 160 8 Q205 20, 225 50 Q240 80, 230 115
+                 Q215 148, 170 160 Q115 170, 65 158 Q20 142, 8 105 Q-2 72, 15 45Z"
+              fill="#48a8a8" stroke="#208878" stroke-width="2.5"/>
+        <!-- Coral/reef texture -->
+        <g opacity="0.15" fill="none" stroke="#80e0d0" stroke-width="0.8">
+          <circle cx="60" cy="50" r="8"/>
+          <circle cx="100" cy="40" r="6"/>
+          <circle cx="150" cy="55" r="7"/>
+          <circle cx="180" cy="90" r="9"/>
+          <circle cx="80" cy="120" r="7"/>
+          <circle cx="130" cy="130" r="8"/>
+        </g>
+        <!-- 6 islands -->
+        <circle cx="50" cy="40" r="5" fill="#38a090" class="map-island-dot"><title>Island 0</title></circle>
+        <circle cx="100" cy="25" r="5" fill="#38a090" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="155" cy="30" r="5" fill="#38a090" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="195" cy="65" r="5" fill="#38a090" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="180" cy="115" r="5" fill="#38a090" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="100" cy="130" r="5" fill="#38a090" class="map-island-dot"><title>Island 5</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="50" y="37" text-anchor="middle" font-size="6" fill="#d0ffff" font-weight="bold">0</text>
+        <text class="map-species-label" x="100" y="22" text-anchor="middle" font-size="6" fill="#d0ffff" font-weight="bold">1</text>
+        <text class="map-species-label" x="155" y="27" text-anchor="middle" font-size="6" fill="#d0ffff" font-weight="bold">2</text>
+        <text class="map-species-label" x="195" y="62" text-anchor="middle" font-size="6" fill="#d0ffff" font-weight="bold">3</text>
+        <text class="map-species-label" x="180" y="112" text-anchor="middle" font-size="6" fill="#d0ffff" font-weight="bold">4</text>
+        <text class="map-species-label" x="100" y="127" text-anchor="middle" font-size="6" fill="#d0ffff" font-weight="bold">5</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="120" y="-14" text-anchor="middle" font-size="14" fill="#104040">The Coral Reef</text>
+        <text class="map-species-label" x="120" y="-4" text-anchor="middle" font-size="7" fill="#1a5a5a">Water/Light ~ gen ~419</text>
+        <!-- Species labels -->
+        <text class="map-species-label" x="50" y="55" text-anchor="middle" fill="#a0e8e0">P. remigans</text>
+        <text class="map-species-label" x="100" y="40" text-anchor="middle" fill="#a0e8e0">P. remigans</text>
+        <text class="map-species-label" x="155" y="45" text-anchor="middle" fill="#a0e8e0">P. remigans</text>
+        <text class="map-species-label" x="195" y="80" text-anchor="middle" fill="#a0e8e0">P. brachialis</text>
+        <text class="map-species-label" x="180" y="132" text-anchor="middle" fill="#a0e8e0">P. brachialis</text>
+        <text class="map-species-label" x="100" y="146" text-anchor="middle" fill="#a0e8e0">P. brachialis</text>
+      </g>
+
+      <!-- Annotation: Steppe convergence -->
+      <g class="map-annotation" transform="translate(155, 55)">
+        <text font-size="7.5" transform="rotate(3)">all the same creature lol</text>
+      </g>
+
+      <!-- Compass rose -->
+      <g transform="translate(845, 35)">
+        <circle cx="0" cy="0" r="18" fill="rgba(212,197,160,0.8)" stroke="#8b7355" stroke-width="1.2"/>
+        <text text-anchor="middle" y="-6" font-size="10" font-weight="bold" fill="#3a2a10" font-family="Georgia, serif">N</text>
+        <text text-anchor="middle" y="14" font-size="7" fill="#5a4a2a" font-family="Georgia, serif">S</text>
+        <text text-anchor="middle" x="-10" y="4" font-size="7" fill="#5a4a2a" font-family="Georgia, serif">W</text>
+        <text text-anchor="middle" x="10" y="4" font-size="7" fill="#5a4a2a" font-family="Georgia, serif">E</text>
+        <line x1="0" y1="-3" x2="0" y2="3" stroke="#3a2a10" stroke-width="0.8"/>
+        <line x1="-3" y1="0" x2="3" y2="0" stroke="#3a2a10" stroke-width="0.8"/>
+      </g>
+
+      <!-- ============================= -->
+      <!-- WAVE 3 SEPARATOR BANNER      -->
+      <!-- ============================= -->
+      <g transform="translate(0, 575)">
+        <!-- Wave 3 zone divider -->
+        <rect x="0" y="0" width="900" height="18" fill="rgba(0,80,70,0.5)"/>
+        <text x="450" y="13" text-anchor="middle" font-family="Comic Sans MS, Chalkboard SE, cursive"
+              font-size="11" font-weight="bold" fill="#00ffcc" letter-spacing="4">
+          ~~~ WAVE 3 TERRITORY — BEYOND HERE BE GROWING CREATURES ~~~
+        </text>
+      </g>
+
+      <!-- Extra open-water doodles in the new space -->
+      <g opacity="0.25" fill="none" stroke="#7090a8" stroke-width="0.6">
+        <path d="M85 650 Q95 645, 105 650 Q115 655, 125 650"/>
+        <path d="M430 700 Q440 695, 450 700 Q460 705, 470 700"/>
+        <path d="M790 630 Q800 625, 810 630 Q820 635, 830 630"/>
+        <path d="M200 760 Q210 755, 220 760"/>
+        <path d="M640 760 Q650 755, 660 760 Q670 765, 680 760"/>
+      </g>
+
+      <!-- ============================= -->
+      <!-- THE PANGAEA (evo 13)          -->
+      <!-- Land/Speed, 8 islands         -->
+      <!-- ============================= -->
+      <defs>
+        <filter id="wave3-glow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <g class="wave3-region active-region" transform="translate(25, 600)">
+        <!-- Glowing border effect underneath -->
+        <path d="M15 55 Q5 20, 50 8 Q110 -10, 180 5 Q240 18, 260 50 Q275 80, 265 125
+                 Q250 160, 190 175 Q120 185, 60 170 Q15 152, 5 110 Q-5 78, 15 55Z"
+              fill="rgba(0,255,180,0.08)" stroke="rgba(0,255,180,0.5)" stroke-width="5" filter="url(#wave3-glow)"/>
+        <!-- Main landmass -->
+        <path class="region-border"
+              d="M15 55 Q5 20, 50 8 Q110 -10, 180 5 Q240 18, 260 50 Q275 80, 265 125
+                 Q250 160, 190 175 Q120 185, 60 170 Q15 152, 5 110 Q-5 78, 15 55Z"
+              fill="#6aaa50" stroke="#3a7830" stroke-width="2.5"/>
+        <path d="M15 55 Q5 20, 50 8 Q110 -10, 180 5 Q240 18, 260 50 Q275 80, 265 125
+                 Q250 160, 190 175 Q120 185, 60 170 Q15 152, 5 110 Q-5 78, 15 55Z"
+              fill="url(#contour-pattern)"/>
+        <!-- DNA helix decoration — growth indicator -->
+        <g stroke="#00ffcc" stroke-width="0.8" opacity="0.5" fill="none">
+          <path d="M120 40 Q125 50, 120 60 Q115 70, 120 80 Q125 90, 120 100"/>
+          <path d="M130 40 Q125 50, 130 60 Q135 70, 130 80 Q125 90, 130 100"/>
+          <line x1="120" y1="50" x2="130" y2="50" stroke-width="0.5"/>
+          <line x1="120" y1="60" x2="130" y2="60" stroke-width="0.5"/>
+          <line x1="120" y1="70" x2="130" y2="70" stroke-width="0.5"/>
+          <line x1="120" y1="80" x2="130" y2="80" stroke-width="0.5"/>
+          <line x1="120" y1="90" x2="130" y2="90" stroke-width="0.5"/>
+        </g>
+        <!-- 8 islands -->
+        <circle cx="40" cy="45" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 0</title></circle>
+        <circle cx="85" cy="28" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="138" cy="22" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="192" cy="32" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="235" cy="58" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="228" cy="108" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 5</title></circle>
+        <circle cx="155" cy="148" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 6</title></circle>
+        <circle cx="70" cy="138" r="5" fill="#5a9a40" class="map-island-dot"><title>Island 7</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="40" y="42" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">0</text>
+        <text class="map-species-label" x="85" y="25" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">1</text>
+        <text class="map-species-label" x="138" y="19" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">2</text>
+        <text class="map-species-label" x="192" y="29" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">3</text>
+        <text class="map-species-label" x="235" y="55" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">4</text>
+        <text class="map-species-label" x="228" y="105" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">5</text>
+        <text class="map-species-label" x="155" y="145" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">6</text>
+        <text class="map-species-label" x="70" y="135" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">7</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="138" y="-16" text-anchor="middle" font-size="14" fill="#1a4a10">The Pangaea</text>
+        <text class="map-species-label" x="138" y="-5" text-anchor="middle" font-size="7" fill="#2a6020">Land/Speed ~ WAVE 3 NEW!!</text>
+        <!-- Wave 3 glow label -->
+        <text font-family="Comic Sans MS, cursive" font-size="8" fill="#00ffcc" x="138" y="165" text-anchor="middle" opacity="0.9">creatures grow here!!</text>
+      </g>
+
+      <!-- Pangaea annotation -->
+      <g class="map-annotation" transform="translate(298, 618)">
+        <text font-size="8" transform="rotate(-5)" fill="#006644">8 islands, growth + signals</text>
+        <text font-size="7" transform="rotate(-5) translate(0, 11)" fill="#008855" opacity="0.8">WAVE 3 -- NEW!!</text>
+      </g>
+
+      <!-- ============================= -->
+      <!-- THE MARIANA (evo 14)          -->
+      <!-- Water/Speed, 8 islands        -->
+      <!-- deep trench shape             -->
+      <!-- ============================= -->
+      <g class="wave3-region active-region" transform="translate(310, 605)">
+        <!-- Glow -->
+        <path d="M5 30 Q8 8, 50 3 Q100 -5, 150 5 Q185 12, 195 35 Q205 60, 195 90
+                 Q182 115, 145 122 Q95 130, 50 120 Q12 108, 5 80 Q-2 55, 5 30Z"
+              fill="rgba(0,200,255,0.08)" stroke="rgba(0,200,255,0.45)" stroke-width="5" filter="url(#wave3-glow)"/>
+        <!-- Trench body — deeper blue, elongated -->
+        <path class="region-border"
+              d="M5 30 Q8 8, 50 3 Q100 -5, 150 5 Q185 12, 195 35 Q205 60, 195 90
+                 Q182 115, 145 122 Q95 130, 50 120 Q12 108, 5 80 Q-2 55, 5 30Z"
+              fill="#2858a0" stroke="#1030608" stroke-width="2.5"/>
+        <!-- Deep trench marks -->
+        <g opacity="0.2" fill="none" stroke="#60a0e0" stroke-width="0.6">
+          <path d="M50 40 Q70 35, 90 40 Q110 45, 130 40"/>
+          <path d="M40 70 Q65 65, 90 70 Q115 75, 140 70"/>
+          <path d="M55 100 Q80 95, 105 100"/>
+        </g>
+        <!-- Very dark trench gradient overlay -->
+        <ellipse cx="100" cy="65" rx="60" ry="35" fill="rgba(0,0,40,0.3)"/>
+        <!-- Signal wave decoration -->
+        <g stroke="#00ccff" stroke-width="0.7" opacity="0.5" fill="none">
+          <circle cx="100" cy="65" r="10"/>
+          <circle cx="100" cy="65" r="18"/>
+          <circle cx="100" cy="65" r="26"/>
+        </g>
+        <!-- 8 islands -->
+        <circle cx="30" cy="28" r="5" fill="#1848908" class="map-island-dot" fill="#185890"><title>Island 0</title></circle>
+        <circle cx="72" cy="15" r="5" fill="#185890" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="118" cy="12" r="5" fill="#185890" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="158" cy="22" r="5" fill="#185890" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="178" cy="52" r="5" fill="#185890" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="168" cy="90" r="5" fill="#185890" class="map-island-dot"><title>Island 5</title></circle>
+        <circle cx="118" cy="108" r="5" fill="#185890" class="map-island-dot"><title>Island 6</title></circle>
+        <circle cx="60" cy="105" r="5" fill="#185890" class="map-island-dot"><title>Island 7</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="30" y="25" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">0</text>
+        <text class="map-species-label" x="72" y="12" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">1</text>
+        <text class="map-species-label" x="118" y="9" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">2</text>
+        <text class="map-species-label" x="158" y="19" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">3</text>
+        <text class="map-species-label" x="178" y="49" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">4</text>
+        <text class="map-species-label" x="168" y="87" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">5</text>
+        <text class="map-species-label" x="118" y="105" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">6</text>
+        <text class="map-species-label" x="60" y="102" text-anchor="middle" font-size="6" fill="#c0e0ff" font-weight="bold">7</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="100" y="-14" text-anchor="middle" font-size="14" fill="#0a2040">The Mariana</text>
+        <text class="map-species-label" x="100" y="-4" text-anchor="middle" font-size="7" fill="#1a3060">Water/Speed ~ WAVE 3 NEW!!</text>
+        <text font-family="Comic Sans MS, cursive" font-size="8" fill="#44ccff" x="100" y="118" text-anchor="middle" opacity="0.9">they can talk to each other now!!</text>
+      </g>
+
+      <!-- Mariana annotation -->
+      <g class="map-annotation" transform="translate(525, 618)">
+        <text font-size="8" transform="rotate(4)" fill="#004466">deep ocean trench</text>
+        <text font-size="7" transform="rotate(4) translate(0, 11)" fill="#006688" opacity="0.8">broadcast signals active</text>
+      </g>
+
+      <!-- ============================= -->
+      <!-- THE AURORA (evo 15)           -->
+      <!-- Land/Light, 6 islands         -->
+      <!-- ============================= -->
+      <g class="wave3-region active-region" transform="translate(545, 590)">
+        <!-- Aurora glow layers -->
+        <path d="M10 45 Q5 12, 48 4 Q90 -5, 130 8 Q162 20, 172 50 Q180 82, 165 115
+                 Q148 145, 105 155 Q62 163, 30 148 Q2 130, 0 95 Q-4 65, 10 45Z"
+              fill="rgba(120,255,120,0.08)" stroke="rgba(100,255,150,0.5)" stroke-width="5" filter="url(#wave3-glow)"/>
+        <path class="region-border"
+              d="M10 45 Q5 12, 48 4 Q90 -5, 130 8 Q162 20, 172 50 Q180 82, 165 115
+                 Q148 145, 105 155 Q62 163, 30 148 Q2 130, 0 95 Q-4 65, 10 45Z"
+              fill="#9ab858" stroke="#5a7830" stroke-width="2.5"/>
+        <path d="M10 45 Q5 12, 48 4 Q90 -5, 130 8 Q162 20, 172 50 Q180 82, 165 115
+                 Q148 145, 105 155 Q62 163, 30 148 Q2 130, 0 95 Q-4 65, 10 45Z"
+              fill="url(#contour-pattern)"/>
+        <!-- Aurora light curtains in the sky above -->
+        <g opacity="0.35" stroke-linecap="round">
+          <line x1="50" y1="-20" x2="42" y2="10" stroke="#00ff88" stroke-width="3"/>
+          <line x1="70" y1="-25" x2="65" y2="8" stroke="#44ffaa" stroke-width="2"/>
+          <line x1="90" y1="-28" x2="88" y2="5" stroke="#88ffcc" stroke-width="2.5"/>
+          <line x1="110" y1="-25" x2="112" y2="7" stroke="#00ff88" stroke-width="2"/>
+          <line x1="130" y1="-20" x2="135" y2="9" stroke="#44ffaa" stroke-width="3"/>
+        </g>
+        <!-- Lighthouse icon -->
+        <line x1="88" y1="20" x2="88" y2="38" stroke="#7a5810" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="88" cy="16" r="5" fill="#88ffcc" stroke="#00aa66" stroke-width="1">
+          <animate attributeName="opacity" values="0.3;1;0.3" dur="1.8s" repeatCount="indefinite"/>
+        </circle>
+        <!-- Signal broadcast arcs -->
+        <g stroke="#00ffcc" stroke-width="0.6" opacity="0.4" fill="none">
+          <path d="M88 16 Q80 10, 72 16"/>
+          <path d="M88 16 Q96 10, 104 16"/>
+          <path d="M88 16 Q76 6, 64 12"/>
+          <path d="M88 16 Q100 6, 112 12"/>
+        </g>
+        <!-- 6 islands -->
+        <circle cx="35" cy="52" r="5" fill="#8aa848" class="map-island-dot"><title>Island 0</title></circle>
+        <circle cx="72" cy="40" r="5" fill="#8aa848" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="128" cy="42" r="5" fill="#8aa848" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="150" cy="88" r="5" fill="#8aa848" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="105" cy="128" r="5" fill="#8aa848" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="40" cy="120" r="5" fill="#8aa848" class="map-island-dot"><title>Island 5</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="35" y="49" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">0</text>
+        <text class="map-species-label" x="72" y="37" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">1</text>
+        <text class="map-species-label" x="128" y="39" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">2</text>
+        <text class="map-species-label" x="150" y="85" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">3</text>
+        <text class="map-species-label" x="105" y="125" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">4</text>
+        <text class="map-species-label" x="40" y="117" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">5</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="88" y="-35" text-anchor="middle" font-size="14" fill="#2a4a10">The Aurora</text>
+        <text class="map-species-label" x="88" y="-24" text-anchor="middle" font-size="7" fill="#3a6020">Land/Light ~ WAVE 3 NEW!!</text>
+        <text font-family="Comic Sans MS, cursive" font-size="8" fill="#88ffcc" x="88" y="147" text-anchor="middle" opacity="0.9">northern lights territory!!</text>
+      </g>
+
+      <!-- ============================= -->
+      <!-- THE BIOLUMINESCENCE (evo 16)  -->
+      <!-- Water/Light, 6 islands        -->
+      <!-- ============================= -->
+      <g class="wave3-region active-region" transform="translate(730, 620)">
+        <!-- Bioluminescent glow -->
+        <path d="M8 35 Q5 10, 40 3 Q75 -5, 110 5 Q138 15, 145 40 Q150 65, 138 92
+                 Q122 118, 88 124 Q52 130, 22 115 Q0 98, 0 68 Q-2 45, 8 35Z"
+              fill="rgba(0,255,180,0.12)" stroke="rgba(0,255,180,0.6)" stroke-width="5" filter="url(#wave3-glow)"/>
+        <path class="region-border"
+              d="M8 35 Q5 10, 40 3 Q75 -5, 110 5 Q138 15, 145 40 Q150 65, 138 92
+                 Q122 118, 88 124 Q52 130, 22 115 Q0 98, 0 68 Q-2 45, 8 35Z"
+              fill="#2878a0" stroke="#107060" stroke-width="2.5"/>
+        <!-- Bioluminescent dots floating in the water -->
+        <g fill="rgba(0,255,180,0.6)" opacity="0.6">
+          <circle cx="40" cy="50" r="2">
+            <animate attributeName="opacity" values="0.2;0.9;0.2" dur="2.1s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="75" cy="38" r="1.5">
+            <animate attributeName="opacity" values="0.6;0.1;0.6" dur="1.7s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="108" cy="55" r="2">
+            <animate attributeName="opacity" values="0.1;0.8;0.1" dur="2.5s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="55" cy="85" r="1.5">
+            <animate attributeName="opacity" values="0.7;0.2;0.7" dur="1.9s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="95" cy="92" r="2">
+            <animate attributeName="opacity" values="0.3;1;0.3" dur="2.3s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="120" cy="72" r="1.5">
+            <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.6s" repeatCount="indefinite"/>
+          </circle>
+        </g>
+        <!-- Signal broadcast rings -->
+        <g stroke="#00ffaa" stroke-width="0.7" opacity="0.4" fill="none">
+          <circle cx="75" cy="65" r="12"/>
+          <circle cx="75" cy="65" r="20"/>
+          <circle cx="75" cy="65" r="28"/>
+        </g>
+        <!-- 6 islands -->
+        <circle cx="28" cy="32" r="5" fill="#107888" class="map-island-dot"><title>Island 0</title></circle>
+        <circle cx="68" cy="20" r="5" fill="#107888" class="map-island-dot"><title>Island 1</title></circle>
+        <circle cx="112" cy="28" r="5" fill="#107888" class="map-island-dot"><title>Island 2</title></circle>
+        <circle cx="128" cy="68" r="5" fill="#107888" class="map-island-dot"><title>Island 3</title></circle>
+        <circle cx="95" cy="105" r="5" fill="#107888" class="map-island-dot"><title>Island 4</title></circle>
+        <circle cx="38" cy="100" r="5" fill="#107888" class="map-island-dot"><title>Island 5</title></circle>
+        <!-- Island numbers -->
+        <text class="map-species-label" x="28" y="29" text-anchor="middle" font-size="6" fill="#d0ffee" font-weight="bold">0</text>
+        <text class="map-species-label" x="68" y="17" text-anchor="middle" font-size="6" fill="#d0ffee" font-weight="bold">1</text>
+        <text class="map-species-label" x="112" y="25" text-anchor="middle" font-size="6" fill="#d0ffee" font-weight="bold">2</text>
+        <text class="map-species-label" x="128" y="65" text-anchor="middle" font-size="6" fill="#d0ffee" font-weight="bold">3</text>
+        <text class="map-species-label" x="95" y="102" text-anchor="middle" font-size="6" fill="#d0ffee" font-weight="bold">4</text>
+        <text class="map-species-label" x="38" y="97" text-anchor="middle" font-size="6" fill="#d0ffee" font-weight="bold">5</text>
+        <!-- Region label -->
+        <text class="map-region-label" x="75" y="-14" text-anchor="middle" font-size="11" fill="#083830">The Bioluminescence</text>
+        <text class="map-species-label" x="75" y="-4" text-anchor="middle" font-size="7" fill="#0a5050">Water/Light ~ WAVE 3 NEW!!</text>
+        <text font-family="Comic Sans MS, cursive" font-size="8" fill="#00ffcc" x="75" y="116" text-anchor="middle" opacity="0.9">glowing deep sea!!</text>
+      </g>
+
+      <!-- Wave 3 general annotation -->
+      <g class="map-annotation" transform="translate(240, 735)">
+        <text font-size="9" fill="#006644" font-weight="bold">WAVE 3 zones: creatures GROW and TALK</text>
+        <text font-size="7" fill="#008855" transform="translate(0,12)" opacity="0.9">20-second simulations ~ full sensor access</text>
+      </g>
+
+      <!-- Title cartouche -->
+      <g transform="translate(450, 790)">
+        <rect x="-160" y="-16" width="320" height="28" rx="4" fill="rgba(212,197,160,0.85)" stroke="#8b7355" stroke-width="1.2"/>
+        <text text-anchor="middle" y="3" font-family="Georgia, serif" font-size="11" fill="#3a2a10" font-weight="bold" font-style="italic">
+          JURASSIC PARK ARCHIPELAGO ~ Charted by Lex Murphy, 2026
+        </text>
+      </g>
+
+      <!-- Scale bar -->
+      <g transform="translate(30, 785)">
+        <line x1="0" y1="0" x2="60" y2="0" stroke="#5a4a2a" stroke-width="1.5"/>
+        <line x1="0" y1="-4" x2="0" y2="4" stroke="#5a4a2a" stroke-width="1"/>
+        <line x1="60" y1="-4" x2="60" y2="4" stroke="#5a4a2a" stroke-width="1"/>
+        <text x="30" y="12" text-anchor="middle" font-size="7" fill="#5a4a2a" font-family="Courier New, monospace">~100 km (approx)</text>
+      </g>
+
+      <!-- Annotation: "i know this!!" near the coral reef -->
+      <g class="map-annotation" transform="translate(810, 430)">
+        <text font-size="9" transform="rotate(-5)" font-weight="bold">"i know this!!"</text>
+        <text font-size="7" transform="rotate(-5) translate(0, 12)">- lex</text>
+      </g>
+
+      <!-- Sea monster doodle in open water -->
+      <g transform="translate(170, 450)" opacity="0.4">
+        <path d="M0 10 Q5 0, 12 8 Q18 2, 25 10 Q32 3, 38 10" fill="none" stroke="#5a4a2a" stroke-width="1" stroke-linecap="round"/>
+        <circle cx="0" cy="10" r="2" fill="#5a4a2a"/>
+        <text x="5" y="28" font-size="6" fill="#5a4a2a" font-family="Comic Sans MS, cursive" font-style="italic">here be monsters?</text>
+      </g>
+
+    </svg>
+
+    <!-- Legend overlay -->
+    <div class="map-legend">
+      <div class="map-legend-title">LEGEND</div>
+      <div class="map-legend-item">
+        <div class="map-legend-swatch" style="background:#7aa858;"></div>
+        <span>Land / Speed</span>
+      </div>
+      <div class="map-legend-item">
+        <div class="map-legend-swatch" style="background:#4878a8;"></div>
+        <span>Water / Speed</span>
+      </div>
+      <div class="map-legend-item">
+        <div class="map-legend-swatch" style="background:#b8a858;"></div>
+        <span>Land / Light</span>
+      </div>
+      <div class="map-legend-item">
+        <div class="map-legend-swatch" style="background:#48a8a8;"></div>
+        <span>Water / Light</span>
+      </div>
+      <div style="border-top:1px solid #8b7355; margin:4px 0;"></div>
+      <div class="map-legend-item">
+        <div class="map-legend-swatch" style="background:transparent; border:2px solid #3a2a10;"></div>
+        <span>Active (bold)</span>
+      </div>
+      <div class="map-legend-item">
+        <div class="map-legend-swatch" style="background:transparent; border:2px dashed #3a2a10; opacity:0.5;"></div>
+        <span>Completed (faded)</span>
+      </div>
+      <div style="border-top:1px solid #00aa88; margin:4px 0;"></div>
+      <div style="font-size:9px; color:#00aa88; font-weight:bold; margin-bottom:3px;">WAVE 3 NEW</div>
+      <div class="map-legend-item">
+        <div class="map-legend-swatch" style="background:#6aaa50; border:2px solid #00cc88;"></div>
+        <span style="color:#00cc88;">Growth + Signals</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PARK HISTORY -->
+<div class="park-history-section">
+  <div class="park-history-title">&#129516; PARK HISTORY</div>
+
+  <div class="history-wave wave1">
+    <div class="history-wave-header">Wave 1 (completed) &mdash; The OG Experiments</div>
+    <div class="history-wave-result">Small populations, fast migration, evolutions 1&ndash;8. Result: monocultures everywhere. Every island converged to the same creature.</div>
+    <div class="history-quote">That's a photocopier. &mdash;Malcolm</div>
+  </div>
+
+  <div class="history-wave wave2">
+    <div class="history-wave-header">Wave 2 (running, gen 300&ndash;450) &mdash; More Room to Breathe</div>
+    <div class="history-wave-result">Bigger populations, slower migration, evolutions 9&ndash;12. Result: 18 species!! Centipede swimmers!! But light-following hit a ceiling &mdash; all the photoreceptors were bugged the whole time (lol).</div>
+    <div class="history-quote">This is what I came here to see. Not just four optimized machines &mdash; but a living ecosystem. &mdash;Alan</div>
+  </div>
+
+  <div class="history-wave wave3">
+    <div class="history-wave-header">&#127381; Wave 3 (JUST LAUNCHED!!) &mdash; THE BIG ONE</div>
+    <ul class="history-wave-features">
+      <li>&#127807; <strong>Developmental growth</strong> &mdash; creatures start as 1 body, grow segments over time!! they actually get BIGGER during the simulation</li>
+      <li>&#128225; <strong>Broadcast signals</strong> &mdash; body parts can communicate with each other!! no more silent limbs</li>
+      <li>&#128065; <strong>Full sensor access</strong> &mdash; ALL photoreceptors now wired in (was bugged before lol, sorry)</li>
+      <li>&#9201; <strong>20-second simulations</strong> &mdash; double the time, double the chaos (was 10s)</li>
+      <li>&#127758; <strong>4 new regions</strong> &mdash; The Pangaea, The Mariana, The Aurora, The Bioluminescence</li>
+    </ul>
+    <div class="history-quote">Rome wasn't built in a day! &mdash;Hammond</div>
+  </div>
+</div>
+
+<!-- TOOLBAR -->
+<div class="toolbar">
+  <div class="specimen-count">
+    showing <strong id="count-display">0</strong> creatures &mdash;
+    <span id="evo-summary" style="color:#ccaaff;">loading...</span>
+  </div>
+  <div class="sort-bar">
+    <button class="sort-btn active" data-sort="captured">newest first</button>
+    <button class="sort-btn" data-sort="fitness">by fitness</button>
+    <button class="sort-btn" data-sort="generation">by generation</button>
+    <button class="sort-btn" data-sort="evolution">by island</button>
+  </div>
+</div>
+
+<!-- UNDER CONSTRUCTION -->
+<div class="under-construction">
+  <span>&#x1F6A7;</span>
+  &nbsp; more creature profiles being added all the time &mdash; check back soon!! &nbsp;
+  <span>&#x1F6A7;</span>
+</div>
+
+<!-- GRID -->
+<div id="grid"></div>
+
+<!-- STAFF QUOTES -->
+<div class="quotes-section" id="staff-quotes">
+  <div class="quotes-section-title">&#128172; what the nerds are saying</div>
+  <div class="quotes-section-intro">
+    my coworkers say things sometimes. here are the good ones.
+    i am surrounded by very dramatic people lol
+  </div>
+  <div class="quotes-grid">
+
+    <div class="quote-card malcolm">
+      <div class="quote-speaker">&#128083; Dr. Ian Malcolm &mdash; mathematician</div>
+      <div class="quote-text">You bred fifty creatures on five islands and they all became the same animal. That's not evolution. That's a photocopier.</div>
+      <div class="quote-lex-comment">ok he IS kind of right though. also he only wears black. every day. black.</div>
+    </div>
+
+    <div class="quote-card malcolm">
+      <div class="quote-speaker">&#128083; Dr. Ian Malcolm &mdash; mathematician</div>
+      <div class="quote-text">A best/avg ratio of 1.0 means death. It's a flatline. An EKG that goes beeeeeep.</div>
+      <div class="quote-lex-comment">he made the "beeeeeep" sound out loud. with his mouth. in a meeting.</div>
+    </div>
+
+    <div class="quote-card malcolm">
+      <div class="quote-speaker">&#128083; Dr. Ian Malcolm &mdash; mathematician</div>
+      <div class="quote-text">You can't rush evolution and you can't optimize it. You can only give it room.</div>
+      <div class="quote-lex-comment">this one is actually really nice. i wrote it on a sticky note.</div>
+    </div>
+
+    <div class="quote-card muldoon">
+      <div class="quote-speaker">&#128100; Robert Muldoon &mdash; park security</div>
+      <div class="quote-text">Clever girl... but the fence is still open.</div>
+      <div class="quote-lex-comment">he says this every time a creature does something unexpected. EVERY time.</div>
+    </div>
+
+    <div class="quote-card muldoon">
+      <div class="quote-speaker">&#128100; Robert Muldoon &mdash; park security</div>
+      <div class="quote-text">The creature is not illegal by the current ruleset. It is exactly as clever as the ruleset allows. That is the problem.</div>
+      <div class="quote-lex-comment">he was looking directly at Cursor velox when he said this. i filmed it.</div>
+    </div>
+
+    <div class="quote-card alan">
+      <div class="quote-speaker">&#129429; Dr. Alan Grant &mdash; paleobiologist</div>
+      <div class="quote-text">THIS IS THE SPECIES I HAVE BEEN WAITING FOR.</div>
+      <div class="quote-lex-comment">he literally yelled this. about the centipede (Scolopendra aquatilis). i respect it.</div>
+    </div>
+
+    <div class="quote-card alan">
+      <div class="quote-speaker">&#129429; Dr. Alan Grant &mdash; paleobiologist</div>
+      <div class="quote-text">This is what I came here to see. Not just four optimized machines &mdash; but a living ecosystem.</div>
+      <div class="quote-lex-comment">alan actually gets it. he's the only one who looks excited instead of worried.</div>
+    </div>
+
+    <div class="quote-card nedry">
+      <div class="quote-speaker">&#128187; Dennis Nedry &mdash; IT dept</div>
+      <div class="quote-text">Ah ah ah, you didn't say the magic word!</div>
+      <div class="quote-lex-comment">he says this when anyone asks him to do anything. ANYTHING. also his code is a mess.</div>
+    </div>
+
+    <div class="quote-card nedry">
+      <div class="quote-speaker">&#128187; Dennis Nedry &mdash; IT dept</div>
+      <div class="quote-text">Noted. Not touching it today &mdash; no ticket, no physics changes, no unsanctioned modifications.</div>
+      <div class="quote-lex-comment">honestly fair. the physics engine blew up once and we don't talk about it.</div>
+    </div>
+
+    <div class="quote-card alan">
+      <div class="quote-speaker">&#129429; Dr. Alan Grant &mdash; paleobiologist</div>
+      <div class="quote-text">Wave 3. Creatures that grow. Creatures that signal each other. Do you understand what that means? We're not watching optimization anymore. We're watching development.</div>
+      <div class="quote-lex-comment">he said this at 7am before coffee. very earnest. i filmed it obviously.</div>
+    </div>
+
+    <div class="quote-card malcolm">
+      <div class="quote-speaker">&#128083; Dr. Ian Malcolm &mdash; mathematician</div>
+      <div class="quote-text">You fixed the sensor bug after 300 generations. The creatures adapted to broken sensors for 300 generations. They are now optimized for a world that no longer exists. Good luck.</div>
+      <div class="quote-lex-comment">ok he has a point. also he said "good luck" the way people say "you're doomed".</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="webring">
+    <a href="#">[ Previous ]</a>
+    &nbsp;&mdash;&nbsp;
+    &#127990; Jurassic Park Web Ring &#127990;
+    &nbsp;&mdash;&nbsp;
+    <a href="#">[ Next ]</a>
+  </div>
+  <div class="footer-links">
+    <a href="#">Sign my guestbook!</a>
+    &nbsp;|&nbsp;
+    <a href="mailto:lex@ingen.com">Email me: lex@ingen.com</a>
+  </div>
+  <div class="footer-fine">
+    &copy; 2026 lex murphy &nbsp;|&nbsp;
+    best viewed in 1024&times;768 &nbsp;|&nbsp;
+    netscape navigator 4.0
+    <br>
+    InGen Corp &mdash; Isla Nublar &mdash; Authorized Personnel Only (but also hi!!)
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---- SPARKLE CURSOR ---- */
+  var colors = ['#ff00cc', '#ffdd00', '#00ffcc', '#ff8844', '#88ffcc', '#ff44aa', '#44aaff'];
+  document.addEventListener('mousemove', function (e) {
+    if (Math.random() > 0.35) return; // only spawn sometimes
+    var sp = document.createElement('div');
+    sp.className = 'sparkle';
+    var size = 4 + Math.random() * 8;
+    sp.style.cssText = [
+      'left:' + e.clientX + 'px',
+      'top:' + e.clientY + 'px',
+      'width:' + size + 'px',
+      'height:' + size + 'px',
+      'background:' + colors[Math.floor(Math.random() * colors.length)],
+      '--dx:' + (Math.random() * 40 - 20) + 'px',
+      '--dy:' + (Math.random() * 40 - 20) + 'px',
+    ].join(';');
+    document.body.appendChild(sp);
+    setTimeout(function () { sp.remove(); }, 700);
+  });
+
+  /* ---- VISITOR COUNTER ---- */
+  var base = 4812;
+  var extra = Math.floor(Math.random() * 999);
+  document.getElementById('visitor-counter').textContent =
+    String(base + extra).padStart(8, '0');
+
+  /* ---- CLOCK ---- */
+  function tick() {
+    var now = new Date();
+    var h = String(now.getUTCHours()).padStart(2, '0');
+    var m = String(now.getUTCMinutes()).padStart(2, '0');
+    var s = String(now.getUTCSeconds()).padStart(2, '0');
+    document.getElementById('clock-display').textContent = h + ':' + m + ':' + s + ' UTC';
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  /* ---- DATA ---- */
+  var allCreatures = [];
+  var currentSort = 'captured';
+
+  /* ---- HELPERS ---- */
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fitnessClass(f) {
+    if (f === null || f === undefined || isNaN(f)) return 'bad';
+    if (f > 20) return 'high';
+    if (f > 5)  return 'medium';
+    if (f > 0)  return 'low';
+    return 'bad';
+  }
+
+  function fitnessLabel(f) {
+    if (f === null || f === undefined || isNaN(f)) return 'N/A';
+    return Number(f).toFixed(2);
+  }
+
+  function starRating(f) {
+    if (f === null || f === undefined || isNaN(f)) return '&#x2606;&#x2606;&#x2606;&#x2606;&#x2606;';
+    var stars;
+    if (f > 25)     stars = 5;
+    else if (f > 15) stars = 4;
+    else if (f > 8)  stars = 3;
+    else if (f > 3)  stars = 2;
+    else             stars = 1;
+    var filled   = '&#11088;'.repeat(stars);
+    var empty    = '&#10025;'.repeat(5 - stars);
+    return filled + empty;
+  }
+
+  function nicknameFor(c) {
+    // Give each creature a Lex-style personal nickname based on what she observed
+    var id = c.id || c.creature_id || '?';
+    var species = c.species || '';
+    var loco = c.locomotion || '';
+    var fitness = c.fitness || 0;
+
+    if (species === 'Scolopendra aquatilis') {
+      return 'THE CENTIPEDE (omg omg omg)';
+    }
+    if (fitness > 25) {
+      return 'creature #' + id + ' &mdash; THE CHAMPION!!';
+    }
+    if (loco.toLowerCase().includes('fail') || (c.threat && c.threat.includes('vibration'))) {
+      return 'creature #' + id + ' &mdash; glorious disaster';
+    }
+    if (loco.toLowerCase().includes('swim')) {
+      return 'creature #' + id + ' &mdash; look at it SWIM!!';
+    }
+    if (loco.toLowerCase().includes('gallop')) {
+      return 'creature #' + id + ' &mdash; it GALLOPS!!';
+    }
+    if (loco.toLowerCase().includes('tumbl') || loco.toLowerCase().includes('shuffle')) {
+      return 'creature #' + id + ' &mdash; lil shuffler';
+    }
+    return 'creature #' + id;
+  }
+
+  function threatClass(threat) {
+    if (!threat) return '';
+    var t = threat.toUpperCase();
+    if (t.startsWith('HIGH'))   return 'HIGH';
+    if (t.startsWith('MEDIUM')) return 'MEDIUM';
+    if (t.startsWith('CLEAN'))  return 'CLEAN';
+    return '';
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '';
+    try {
+      var d = new Date(iso);
+      return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    } catch(e) { return iso; }
+  }
+
+  /* ---- BUILD CARD ---- */
+  function buildCard(c) {
+    var creatureId    = c.id || c.creature_id || '?';
+    var evolutionName = c.evolution || c.evolution_name || 'Unknown';
+    var evolutionId   = c.evoId || c.evolution_id || '?';
+    var generation    = c.generation || '?';
+    var capturedAt    = c.timestamp || c.captured_at || null;
+    var species       = c.species || null;
+    var locomotion    = c.locomotion || null;
+    var environment   = c.environment || null;
+    var notes         = c.notes || null;
+    var threat        = c.threat || null;
+
+    var rawThumb = c.thumbnail || null;
+    var rawVideo = c.video || null;
+    var thumbSrc = rawThumb
+      ? (rawThumb.includes('/') ? rawThumb : 'thumbnails/' + rawThumb)
+      : null;
+    var videoSrc = rawVideo
+      ? (rawVideo.includes('/') ? rawVideo : 'videos/' + rawVideo)
+      : null;
+
+    var fClass = fitnessClass(c.fitness);
+    var fLabel = fitnessLabel(c.fitness);
+    var stars  = starRating(c.fitness);
+    var tClass = threatClass(threat);
+    var nickname = nicknameFor(c);
+
+    var thumbHtml = thumbSrc
+      ? '<img class="thumb" src="' + esc(thumbSrc) + '" alt="creature thumbnail" loading="lazy" />'
+      : '<div class="no-thumb">no footage yet...</div>';
+
+    var videoHtml = videoSrc
+      ? '<video src="' + esc(videoSrc) + '" loop muted playsinline preload="none"></video>'
+      : '';
+
+    var threatHtml = tClass
+      ? '<div class="threat-ribbon ' + tClass + '">' + esc(threat) + '</div>'
+      : '';
+
+    var playHtml = videoSrc
+      ? '<div class="play-hint"><div class="play-hint-inner">&#9654; click to play!!</div></div>'
+      : '';
+
+    var locoHtml = locomotion
+      ? '<div class="loco-tag">&#128256; ' + esc(locomotion) + '</div>'
+      : '';
+
+    var notesHtml = notes ? (
+      '<div class="notes-section">' +
+        '<div class="notes-label">&#128247; lex\'s notes</div>' +
+        '<div class="notes-text">' + esc(notes) + '</div>' +
+      '</div>'
+    ) : '';
+
+    var metaEnv = environment
+      ? '<span>env: <strong>' + esc(environment) + '</strong></span>'
+      : '';
+
+    // wave badge
+    var evoIdNum = parseInt(evolutionId, 10) || 0;
+    var waveNum = evoIdNum <= 8 ? 1 : evoIdNum <= 12 ? 2 : 3;
+    var waveBadgeHtml = '<span class="wave-badge w' + waveNum + '">W' + waveNum + '</span>';
+
+    var div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML =
+      '<div class="media-wrap" data-has-video="' + (videoSrc ? '1' : '0') + '">' +
+        thumbHtml +
+        videoHtml +
+        '<div class="rec-badge"><div class="rec-dot"></div>REC</div>' +
+        threatHtml +
+        playHtml +
+      '</div>' +
+      '<div class="card-body">' +
+        '<div class="creature-nickname">' + nickname + '</div>' +
+        (species ? '<div class="creature-species"><em>' + esc(species) + '</em></div>' : '') +
+        '<div class="evolution-badge">&#127758; ' + esc(evolutionName) + waveBadgeHtml + '</div>' +
+        '<div class="fitness-row">' +
+          '<div class="fitness-display ' + fClass + '">' +
+            '<div style="font-size:10px;color:#aa88cc;margin-bottom:2px;">fitness score</div>' +
+            '<div class="fitness-num">' + fLabel + '</div>' +
+          '</div>' +
+          '<div class="star-rating">' + stars + '</div>' +
+        '</div>' +
+        locoHtml +
+        '<div class="meta-grid">' +
+          '<span>gen: <strong>' + esc(String(generation)) + '</strong></span>' +
+          '<span>evo id: <strong>#' + esc(String(evolutionId)) + '</strong></span>' +
+          metaEnv +
+        '</div>' +
+        notesHtml +
+        '<div class="card-footer">&#128338; filmed ' + fmtTime(capturedAt) + '</div>' +
+      '</div>';
+
+    // click-to-play
+    var mediaWrap = div.querySelector('.media-wrap');
+    var video     = div.querySelector('video');
+    if (video && mediaWrap) {
+      mediaWrap.addEventListener('click', function () {
+        if (mediaWrap.classList.contains('playing')) {
+          video.pause();
+          mediaWrap.classList.remove('playing');
+        } else {
+          document.querySelectorAll('.media-wrap.playing').forEach(function (mw) {
+            mw.classList.remove('playing');
+            var v = mw.querySelector('video');
+            if (v) v.pause();
+          });
+          video.play().catch(function () {});
+          mediaWrap.classList.add('playing');
+        }
+      });
+      video.addEventListener('ended', function () {
+        mediaWrap.classList.remove('playing');
+      });
+    }
+
+    return div;
+  }
+
+  /* ---- SORT ---- */
+  function sortedCreatures(creatures, by) {
+    var arr = creatures.slice();
+    if (by === 'fitness') {
+      arr.sort(function (a, b) { return (b.fitness || -Infinity) - (a.fitness || -Infinity); });
+    } else if (by === 'generation') {
+      arr.sort(function (a, b) { return (b.generation || 0) - (a.generation || 0); });
+    } else if (by === 'evolution') {
+      arr.sort(function (a, b) {
+        var na = a.evolution || a.evolution_name || '';
+        var nb = b.evolution || b.evolution_name || '';
+        return na.localeCompare(nb);
+      });
+    } else {
+      arr.sort(function (a, b) {
+        return new Date(b.timestamp || b.captured_at || 0) - new Date(a.timestamp || a.captured_at || 0);
+      });
+    }
+    return arr;
+  }
+
+  /* ---- RENDER ---- */
+  function render() {
+    var grid   = document.getElementById('grid');
+    grid.innerHTML = '';
+
+    var sorted = sortedCreatures(allCreatures, currentSort);
+
+    if (sorted.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.innerHTML =
+        '<div class="big-text">&#128247; no creatures yet!!</div>' +
+        '<div>lex is still out filming... check back soon!! &#128064;</div>';
+      grid.appendChild(empty);
+    } else {
+      sorted.forEach(function (c) { grid.appendChild(buildCard(c)); });
+    }
+
+    // update UI counts
+    document.getElementById('count-display').textContent = sorted.length;
+    document.getElementById('specimen-count-meta').textContent = sorted.length + ' specimens documented';
+
+    // evo summary
+    var evoMap = {};
+    allCreatures.forEach(function (c) {
+      var n = c.evolution || c.evolution_name || 'Unknown';
+      evoMap[n] = (evoMap[n] || 0) + 1;
+    });
+    var parts = Object.entries(evoMap).map(function (e) { return e[1] + 'x ' + e[0]; });
+    document.getElementById('evo-summary').textContent =
+      parts.length ? parts.join(' | ') : 'no data';
+  }
+
+  /* ---- SORT BUTTONS ---- */
+  document.querySelectorAll('.sort-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.sort-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      currentSort = btn.dataset.sort;
+      render();
+    });
+  });
+
+  /* ---- FETCH ---- */
+  function load() {
+    fetch('creatures.json?' + Date.now())
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        allCreatures = Array.isArray(data) ? data : [];
+        render();
+      })
+      .catch(function (err) {
+        console.error('creatures.json load failed:', err);
+        allCreatures = [];
+        render();
+      });
+  }
+
+  load();
+  setInterval(load, 30000);
+
+})();
+</script>
+</body>
+</html>

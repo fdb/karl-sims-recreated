@@ -103,6 +103,38 @@ impl World {
         idx
     }
 
+    /// Add a body to the world during simulation (after Rapier is initialized).
+    /// Returns the body index. Also creates the corresponding Rapier rigid body.
+    pub fn add_body_dynamic(&mut self, half_extents: DVec3) -> usize {
+        let idx = self.bodies.len();
+        self.bodies.push(RigidBody::new(half_extents));
+        self.transforms.push(DAffine3::IDENTITY);
+
+        // If Rapier is initialized, also add the body there.
+        if let Some(rapier) = &mut self.rapier_state {
+            rapier.add_body_dynamic(
+                &self.bodies[idx],
+                &self.transforms[idx],
+                self.water_enabled,
+            );
+        }
+        idx
+    }
+
+    /// Add a joint to the world during simulation (after Rapier is initialized).
+    /// Returns the joint index. Also creates the corresponding Rapier impulse joint.
+    pub fn add_joint_dynamic(&mut self, joint: Joint) -> usize {
+        let idx = self.joints.len();
+        self.joints.push(joint);
+        self.torques.push([0.0; 3]);
+
+        // If Rapier is initialized, also add the joint there.
+        if let Some(rapier) = &mut self.rapier_state {
+            rapier.add_joint_dynamic(&self.joints[idx]);
+        }
+        idx
+    }
+
     pub fn set_root_transform(&mut self, transform: DAffine3) {
         self.transforms[self.root] = transform;
     }

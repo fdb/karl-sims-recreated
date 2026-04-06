@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   getGenotypeInfo,
   getGenomeBytes,
@@ -45,6 +45,28 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
   const [goal, setGoal] = useState<"SwimmingSpeed" | "LightFollowing">("SwimmingSpeed");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportDone, setExportDone] = useState(false);
+
+  // Check for ?export=video URL param
+  const autoExport = new URLSearchParams(window.location.search).get("export") === "video";
+
+  const handleExport = useCallback(() => {
+    setExporting(true);
+    setExportDone(false);
+  }, []);
+
+  const handleVideoExported = useCallback((blob: Blob, _filename: string) => {
+    // Auto-download as WebM
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `creature-${creatureId}.webm`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setExporting(false);
+    setExportDone(true);
+  }, [creatureId]);
 
   useEffect(() => {
     (async () => {
@@ -130,8 +152,28 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
                 <p className="text-text-muted text-sm">Loading creature...</p>
               </div>
             )}
-            {genomeBytes && <CreatureViewer genomeBytes={genomeBytes} environment={environment} goal={goal} />}
+            {genomeBytes && (
+              <CreatureViewer
+                genomeBytes={genomeBytes}
+                environment={environment}
+                goal={goal}
+                exportVideo={exporting || (autoExport && !exportDone)}
+                onVideoExported={handleVideoExported}
+              />
+            )}
           </div>
+        </div>
+        <div className="lg:col-span-2 flex items-center gap-3">
+          <button
+            onClick={handleExport}
+            disabled={exporting || !genomeBytes}
+            className="px-3 py-1.5 text-sm rounded border border-border-subtle hover:bg-bg-surface transition-colors disabled:opacity-50"
+          >
+            {exporting ? "Exporting…" : exportDone ? "✓ Export again" : "Export 10s Video (.webm)"}
+          </button>
+          {exportDone && (
+            <span className="text-sm text-success">Video downloaded!</span>
+          )}
         </div>
         <div className="lg:col-span-1 space-y-4 lg:overflow-y-auto lg:max-h-[calc(100vh-200px)]">
           {info && (

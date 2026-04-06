@@ -24,7 +24,7 @@ fn main() {
         environment, sim_duration: 10.0, max_parts: 20,
         gravity: 9.81, water_viscosity: 2.0, max_body_angular_velocity: Some(20.0),
         num_islands: 1, migration_interval: 20, min_joint_motion: Some(0.3),
-        settle_duration: Some(1.0),
+        settle_duration: Some(1.0), num_signal_channels: 0, growth_interval: None,
     };
 
     let mut flag_counts: BTreeMap<String, usize> = BTreeMap::new();

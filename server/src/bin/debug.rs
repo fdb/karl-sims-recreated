@@ -16,7 +16,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let opts = parse_args(&args);
 
-    let db_path = opts.db.unwrap_or_else(|| PathBuf::from("karl-sims.db"));
+    let db_path = opts.db.unwrap_or_else(|| PathBuf::from(std::env::var("PARK_DB").unwrap_or_else(|_| "park.db".to_string())));
     let conn = Connection::open(&db_path)
         .unwrap_or_else(|e| panic!("Cannot open {:?}: {e}", db_path));
 

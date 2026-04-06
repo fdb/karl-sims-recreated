@@ -166,6 +166,51 @@ pub fn set_evolution_name(conn: &Connection, evo_id: i64, name: Option<&str>) {
     .expect("Failed to update evolution name");
 }
 
+/// Patch a single field in config_json.
+///
+/// Reads the stored JSON, merges `patch` into it (top-level keys only), and
+/// writes it back. This is the safe way to update individual params (e.g.
+/// `max_generations`) without clobbering the rest of the config.
+pub fn patch_evolution_config(conn: &Connection, evo_id: i64, patch: &serde_json::Value) {
+    let config_json: String = conn
+        .query_row(
+            "SELECT config_json FROM evolutions WHERE id = ?1",
+            params![evo_id],
+            |row| row.get(0),
+        )
+        .expect("Failed to read config_json for patch");
+
+    let mut config: serde_json::Value =
+        serde_json::from_str(&config_json).unwrap_or(serde_json::json!({}));
+
+    if let (Some(obj), Some(patch_obj)) = (config.as_object_mut(), patch.as_object()) {
+        for (k, v) in patch_obj {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
+
+    let new_json = serde_json::to_string(&config).expect("Failed to serialise patched config");
+    conn.execute(
+        "UPDATE evolutions SET config_json=?1, updated_at=datetime('now') WHERE id=?2",
+        params![new_json, evo_id],
+    )
+    .expect("Failed to write patched config_json");
+}
+
+/// Read max_generations from the stored config_json. Returns `None` if the
+/// evolution doesn't exist or the field is absent.
+pub fn get_max_generations(conn: &Connection, evo_id: i64) -> Option<usize> {
+    let config_json: String = conn
+        .query_row(
+            "SELECT config_json FROM evolutions WHERE id = ?1",
+            params![evo_id],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let v: serde_json::Value = serde_json::from_str(&config_json).ok()?;
+    v.get("max_generations")?.as_u64().map(|n| n as usize)
+}
+
 /// Insert a genotype, return its ID. `island_id` is 0 for single-pool
 /// evolutions, or the island index for islands-model runs.
 pub fn insert_genotype(
