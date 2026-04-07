@@ -51,26 +51,40 @@ export default function EvolutionDetail({ evoId }: Props) {
   const [nameInput, setNameInput] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  // Guard: skip poll if the previous one hasn't finished yet. This prevents
+  // request pile-up when the server is slow (e.g. large WAL). Without this,
+  // setInterval fires a new batch of 4 API calls every 5s even if the previous
+  // batch is still pending, quickly exhausting the server's read pool.
+  const busyRef = useRef(false);
+
   const refresh = useCallback(async () => {
-    const evo = await getEvolution(evoId);
-    setEvolution(evo);
-    const useIslands = (evo.config?.num_islands ?? 1) > 1;
-    const [best, stats] = await Promise.all([
-      getBestCreatures(evoId),
-      getEvolutionStats(evoId),
-    ]);
-    setBestCreatures(best);
-    setHistoricalStats(stats);
-    if (useIslands) {
-      const [perIsland, isStats] = await Promise.all([
-        getBestPerIsland(evoId),
-        getIslandStats(evoId),
+    if (busyRef.current) return; // previous poll still in flight
+    busyRef.current = true;
+    try {
+      const evo = await getEvolution(evoId);
+      setEvolution(evo);
+      const useIslands = (evo.config?.num_islands ?? 1) > 1;
+      const [best, stats] = await Promise.all([
+        getBestCreatures(evoId),
+        getEvolutionStats(evoId),
       ]);
-      setBestPerIsland(perIsland);
-      setIslandStats(isStats);
-    } else {
-      setBestPerIsland([]);
-      setIslandStats([]);
+      setBestCreatures(best);
+      setHistoricalStats(stats);
+      if (useIslands) {
+        const [perIsland, isStats] = await Promise.all([
+          getBestPerIsland(evoId),
+          getIslandStats(evoId),
+        ]);
+        setBestPerIsland(perIsland);
+        setIslandStats(isStats);
+      } else {
+        setBestPerIsland([]);
+        setIslandStats([]);
+      }
+    } catch {
+      // Network error / server stall — silently skip this poll cycle.
+    } finally {
+      busyRef.current = false;
     }
   }, [evoId]);
 

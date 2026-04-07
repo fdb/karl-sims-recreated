@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listEvolutions,
   stopEvolution,
@@ -13,10 +13,19 @@ import CreateEvolutionForm from "../components/CreateEvolutionForm";
 export default function EvolutionList() {
   const [evolutions, setEvolutions] = useState<Evolution[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const busyRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    const evos = await listEvolutions();
-    setEvolutions(evos);
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      const evos = await listEvolutions();
+      setEvolutions(evos);
+    } catch {
+      // skip this poll cycle on error
+    } finally {
+      busyRef.current = false;
+    }
   }, []);
 
   useEffect(() => {

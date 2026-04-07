@@ -135,6 +135,20 @@ pub fn init_db(path: &str) -> DbPool {
     )
     .ok();
 
+    // Force a TRUNCATE checkpoint on startup. At this point we're the only
+    // connection — no readers exist yet — so the checkpoint can move ALL WAL
+    // frames back to the main DB file and reset the WAL to zero bytes. This
+    // clears any WAL bloat from previous runs (e.g. the 619 MB death spiral
+    // where autocheckpoint couldn't run because readers always held snapshots).
+    match conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+        Ok((row.get::<_, i32>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?))
+    }) {
+        Ok((busy, total, checkpointed)) => {
+            log::info!("Startup WAL checkpoint: {checkpointed}/{total} pages (busy={busy})");
+        }
+        Err(e) => log::warn!("Startup WAL checkpoint failed: {e}"),
+    }
+
     drop(conn);
     pool
 }
