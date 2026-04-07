@@ -21,6 +21,11 @@ use crate::engine::{
 };
 use crate::timing::timed_db;
 
+/// Sentinel value meaning "this creature has not been evaluated yet."
+/// Distinguishes unevaluated offspring from creatures that legitimately
+/// scored 0.0 (e.g. early termination).
+const NEEDS_EVAL: f64 = f64::NEG_INFINITY;
+
 /// Run a full evolution loop.  Hot state lives in memory; SQLite is used
 /// only for archival writes (so the creature viewer can fetch genomes)
 /// and status reads (so PATCH /stop works across restart).
@@ -92,7 +97,7 @@ pub async fn run_evolution(
                     let bytes = bincode::serialize(&genome).unwrap();
                     let gid = insert_genotype(conn, evo_id, 0, &bytes, None, island_id as i64);
                     create_task(conn, evo_id, gid);
-                    island_individuals[island_id].push((genome, 0.0, gid));
+                    island_individuals[island_id].push((genome, NEEDS_EVAL, gid));
                 }
             }
         });
@@ -235,7 +240,7 @@ pub async fn run_evolution(
                         let bytes = bincode::serialize(&genome).unwrap();
                         let gid = insert_genotype(conn, evo_id, next_gen as i64, &bytes, None, island_id as i64);
                         create_task(conn, evo_id, gid);
-                        island_individuals[island_id].push((genome, 0.0, gid));
+                        island_individuals[island_id].push((genome, NEEDS_EVAL, gid));
                     }
                 }
             });
@@ -339,8 +344,7 @@ pub async fn run_evolution(
                     let gid = insert_genotype(
                         conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
                     );
-                    // Needs evaluation — fitness starts at 0
-                    bucket.push((child, 0.0, gid));
+                    bucket.push((child, NEEDS_EVAL, gid));
                     offspring_count += 1;
                 }
 
@@ -370,7 +374,7 @@ pub async fn run_evolution(
                     let gid = insert_genotype(
                         conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
                     );
-                    bucket.push((child, 0.0, gid));
+                    bucket.push((child, NEEDS_EVAL, gid));
                     offspring_count += 1;
                 }
             }
@@ -409,30 +413,34 @@ pub async fn run_evolution(
 }
 
 /// Send creatures that need evaluation to workers via channel and collect results.
+///
+/// Results arrive in arbitrary order (workers process at different speeds),
+/// so each task carries a `task_index` that's echoed in the result, allowing
+/// us to match fitness back to the correct creature.
 fn evaluate_generation(
     engine: &Engine,
     config_json: &str,
     island_individuals: &mut Vec<Vec<(GenomeGraph, f64, i64)>>,
 ) {
-    // Collect indices of creatures needing evaluation (fitness == 0)
-    let mut tasks_sent = 0usize;
     let (result_tx, result_rx) = crossbeam_channel::bounded(
         island_individuals.iter().map(|i| i.len()).sum::<usize>() + 1,
     );
 
-    // We need to track which (island, index) each task corresponds to.
-    // Since results come back in arbitrary order, we use a flat index.
-    let mut task_map: Vec<(usize, usize)> = Vec::new(); // (island_id, idx_within_island)
+    // Map from flat task_index → (island_id, idx_within_island).
+    let mut task_map: Vec<(usize, usize)> = Vec::new();
+    let mut tasks_sent = 0usize;
 
     for (island_id, island) in island_individuals.iter().enumerate() {
         for (idx, (genome, fitness, _gid)) in island.iter().enumerate() {
-            if *fitness != 0.0 {
-                continue; // survivor — already has fitness
+            if *fitness != NEEDS_EVAL {
+                continue; // survivor — already evaluated
             }
             let bytes = bincode::serialize(genome).unwrap();
+            let task_index = task_map.len();
             engine
                 .task_tx
                 .send(EvalTask {
+                    task_index,
                     genome_bytes: bytes,
                     config_json: config_json.to_string(),
                     result_tx: result_tx.clone(),
@@ -443,18 +451,20 @@ fn evaluate_generation(
         }
     }
 
-    // Drop our copy of result_tx so the channel closes when all workers are done
+    // Drop our copy so the channel closes when all workers finish
     drop(result_tx);
 
-    // Collect exactly `tasks_sent` results
-    for i in 0..tasks_sent {
+    // Collect results — use task_index to match back to the right creature
+    let mut received = 0usize;
+    while received < tasks_sent {
         match result_rx.recv() {
             Ok(result) => {
-                let (island_id, idx) = task_map[i];
+                let (island_id, idx) = task_map[result.task_index];
                 island_individuals[island_id][idx].1 = result.fitness;
+                received += 1;
             }
             Err(_) => {
-                log::error!("Result channel closed prematurely ({i}/{tasks_sent} received)");
+                log::error!("Result channel closed prematurely ({received}/{tasks_sent})");
                 break;
             }
         }

@@ -62,6 +62,11 @@ fn run_worker_loop(task_rx: Receiver<EvalTask>, worker_id: String) {
 
         // Send result back to the coordinator.  If the receiver is dropped
         // (coordinator gave up on this generation), silently discard.
-        task.result_tx.send(EvalResult { fitness }).ok();
+        task.result_tx
+            .send(EvalResult {
+                task_index: task.task_index,
+                fitness,
+            })
+            .ok();
     }
 }

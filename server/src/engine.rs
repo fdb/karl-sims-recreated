@@ -16,6 +16,10 @@ use serde::Serialize;
 
 /// A fitness evaluation job sent from coordinator to worker pool.
 pub struct EvalTask {
+    /// Opaque index for matching results back to the originating creature.
+    /// Workers echo this back in EvalResult so the coordinator can assign
+    /// fitness to the correct individual regardless of arrival order.
+    pub task_index: usize,
     /// Serialized genome (bincode).
     pub genome_bytes: Vec<u8>,
     /// Serialized EvolutionParams (JSON).
@@ -28,6 +32,8 @@ pub struct EvalTask {
 
 /// Fitness result sent from worker back to coordinator.
 pub struct EvalResult {
+    /// Echoed from EvalTask — identifies which creature this result belongs to.
+    pub task_index: usize,
     pub fitness: f64,
 }
 
