@@ -125,7 +125,7 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
 
       {/* Two-column: 3D viewer (large) + genome info (sidebar) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-3">
           <div className="bg-bg-surface border border-border-subtle rounded-lg overflow-hidden aspect-[4/3] sm:aspect-[3/2] relative">
             {loading && (
               <div className="absolute inset-0 flex items-center justify-center z-10">
@@ -141,17 +141,17 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
               />
             )}
           </div>
-        </div>
-        <div className="lg:col-span-2 flex items-center gap-3">
-          <a
-            href={`?export=video`}
-            className="px-3 py-1.5 text-sm rounded border border-border-subtle hover:bg-bg-surface transition-colors inline-block"
-          >
-            Export 10s Video (.mp4)
-          </a>
-          <span className="text-xs text-text-muted">
-            Use <code>tools/capture-video.sh {evoId} {creatureId}</code> for CLI export
-          </span>
+          <div className="flex items-center gap-3">
+            <a
+              href={`?export=video`}
+              className="px-3 py-1.5 text-sm rounded border border-border-subtle hover:bg-bg-surface transition-colors inline-block"
+            >
+              Export 10s Video (.mp4)
+            </a>
+            <span className="text-xs text-text-muted">
+              Use <code>tools/capture-video.sh {evoId} {creatureId}</code> for CLI export
+            </span>
+          </div>
         </div>
         <div className="lg:col-span-1 space-y-4 lg:overflow-y-auto lg:max-h-[calc(100vh-200px)]">
           {info && (

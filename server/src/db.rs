@@ -21,24 +21,40 @@ fn apply_pragmas(conn: &mut Connection) -> rusqlite::Result<()> {
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=NORMAL;
          PRAGMA busy_timeout=5000;
-         PRAGMA foreign_keys=ON;",
+         PRAGMA foreign_keys=ON;
+         PRAGMA mmap_size=268435456;
+         PRAGMA cache_size=-65536;",
     )
 }
 
-/// Open (or create) the database, ensure all tables exist, and return a pool.
+/// Pragmas for read-only connections. No busy_timeout needed (WAL readers
+/// never hit SQLITE_BUSY), `query_only` prevents accidental writes, and
+/// `mmap_size` gives fast BLOB reads via memory-mapped I/O.
+fn apply_read_pragmas(conn: &mut Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA query_only=ON;
+         PRAGMA mmap_size=268435456;
+         PRAGMA cache_size=-65536;",
+    )
+}
+
+/// Open (or create) the database, ensure all tables exist, and return a
+/// write pool. Size is `num_cpus + 4` so every worker thread + the
+/// coordinator + a few mutating API calls always have a connection
+/// without blocking. Previously this was fixed at 16, which was smaller
+/// than `num_cpus` on machines with 20+ cores — causing pool starvation
+/// that cascaded into multi-second API stalls.
 pub fn init_db(path: &str) -> DbPool {
-    // Run the schema + migrations on a dedicated connection first, so that by
-    // the time the pool hands connections out they all see a fully migrated DB.
     let manager = SqliteConnectionManager::file(path).with_init(|c| {
         apply_pragmas(c)
     });
-    // 16 connections is plenty: N worker threads + the coordinator + a handful
-    // of concurrent API requests. `r2d2` blocks callers waiting past this cap,
-    // but real contention is unlikely given the short critical sections.
+    let write_pool_size = (num_cpus::get() + 4) as u32;
     let pool = r2d2::Pool::builder()
-        .max_size(16)
+        .max_size(write_pool_size)
         .build(manager)
-        .expect("Failed to build SQLite pool");
+        .expect("Failed to build SQLite write pool");
+    log::info!("Write pool: {write_pool_size} connections");
 
     let conn = pool.get().expect("Failed to acquire initial connection");
 
@@ -120,6 +136,24 @@ pub fn init_db(path: &str) -> DbPool {
     .ok();
 
     drop(conn);
+    pool
+}
+
+/// Create a separate read-only pool for API GET handlers.
+///
+/// Under WAL, read-only connections NEVER contend for the writer lock
+/// and NEVER hit SQLITE_BUSY, so they don't need `busy_timeout` and
+/// can't be blocked by the coordinator's write bursts. This completely
+/// decouples UI read latency from evolution write throughput.
+pub fn init_read_pool(path: &str) -> DbPool {
+    let manager = SqliteConnectionManager::file(path).with_init(|c| {
+        apply_read_pragmas(c)
+    });
+    let pool = r2d2::Pool::builder()
+        .max_size(8)
+        .build(manager)
+        .expect("Failed to build SQLite read pool");
+    log::info!("Read pool: 8 connections");
     pool
 }
 

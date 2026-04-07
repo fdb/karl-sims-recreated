@@ -6,7 +6,7 @@ mod worker;
 mod ws;
 
 use api::AppState;
-use db::init_db;
+use db::{init_db, init_read_pool};
 
 #[tokio::main]
 async fn main() {
@@ -15,6 +15,7 @@ async fn main() {
     let db_path = std::env::var("PARK_DB").unwrap_or_else(|_| "park.db".to_string());
     let db_path = db_path.as_str();
     let db = init_db(db_path);
+    let read_db = init_read_pool(db_path);
     log::info!("Database initialized");
 
     // Profiling: periodic p50/p99 table + WAL-size monitor. Low overhead
@@ -35,6 +36,7 @@ async fn main() {
 
     let state = AppState {
         db: db.clone(),
+        read_db: read_db.clone(),
         tx: tx.clone(),
     };
 

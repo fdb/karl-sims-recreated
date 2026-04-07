@@ -12,7 +12,12 @@ use crate::ws::UpdateSender;
 
 #[derive(Clone)]
 pub struct AppState {
+    /// Write pool — used by coordinator, workers, and mutating API calls.
     pub db: DbPool,
+    /// Read-only pool — used by all GET API handlers. WAL readers never
+    /// contend for the writer lock, so this pool is completely isolated
+    /// from evolution write throughput.
+    pub read_db: DbPool,
     pub tx: UpdateSender,
 }
 
@@ -122,7 +127,7 @@ async fn list_evolutions(State(state): State<AppState>) -> Json<Vec<EvolutionInf
     // synchronous rusqlite calls, and we don't want them occupying a tokio
     // runtime worker (which would block unrelated HTTP traffic).
     // `db_read_async` measures all three latencies — see `timing.rs`.
-    let evos = db_read_async("api.list_evolutions", state.db.clone(), |c| {
+    let evos = db_read_async("api.list_evolutions", state.read_db.clone(), |c| {
         db::list_evolutions(c)
     })
     .await;
@@ -200,7 +205,7 @@ async fn get_evolution(
 ) -> Json<serde_json::Value> {
     // The hot read: UI polls this for evolution status/generation. Expect
     // sub-ms query, sub-ms acquire. Any spike here is the bug we're hunting.
-    let full = db_read_async("api.get_evolution", state.db.clone(), move |c| {
+    let full = db_read_async("api.get_evolution", state.read_db.clone(), move |c| {
         db::get_evolution_full(c, id)
     })
     .await;
@@ -276,7 +281,7 @@ async fn get_best(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let best = db_read_async("api.get_best", state.db.clone(), move |c| {
+    let best = db_read_async("api.get_best", state.read_db.clone(), move |c| {
         db::get_best_genotypes(c, id, 10)
     })
     .await;
@@ -293,7 +298,7 @@ async fn get_best_per_island_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let best = db_read_async("api.get_best_per_island", state.db.clone(), move |c| {
+    let best = db_read_async("api.get_best_per_island", state.read_db.clone(), move |c| {
         db::get_best_per_island(c, id)
     })
     .await;
@@ -392,7 +397,7 @@ async fn get_evolution_stats(
 ) -> Json<Vec<serde_json::Value>> {
     // UI chart data: can be expensive as generations accumulate — a GROUP BY
     // over all genotypes in the evolution. Watch query-p99 here.
-    let stats = db_read_async("api.get_evolution_stats", state.db.clone(), move |c| {
+    let stats = db_read_async("api.get_evolution_stats", state.read_db.clone(), move |c| {
         db::get_generation_stats(c, id)
     })
     .await;
@@ -414,7 +419,7 @@ async fn get_island_stats_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<Vec<serde_json::Value>> {
-    let stats = db_read_async("api.get_island_stats", state.db.clone(), move |c| {
+    let stats = db_read_async("api.get_island_stats", state.read_db.clone(), move |c| {
         db::get_island_stats(c, id)
     })
     .await;
@@ -437,7 +442,7 @@ async fn get_genome_bytes(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let bytes = db_read_async("api.get_genome_bytes", state.db.clone(), move |c| {
+    let bytes = db_read_async("api.get_genome_bytes", state.read_db.clone(), move |c| {
         db::get_genotype(c, id)
     })
     .await;
@@ -462,7 +467,7 @@ async fn get_phenotype_info(
     // runs on a blocking-pool thread. Tokio runtime workers stay free to
     // handle other HTTP traffic. The pool connection is released as soon as
     // the BLOB read completes, before the CPU-heavy JSON tree is built.
-    let db = state.db.clone();
+    let db = state.read_db.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
         // Only the BLOB read is DB work; the develop() + JSON build below is
         // CPU-bound and shouldn't be attributed to query latency.
@@ -525,7 +530,7 @@ async fn get_genotype_info(
     // All DB + CPU work happens on the blocking pool. Connection is dropped
     // immediately after fetching the BLOB, before the (often large) JSON
     // tree over neurons/connections is built.
-    let db = state.db.clone();
+    let db = state.read_db.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
         let bytes = timed_db("api.get_genotype_info", &db, |c| db::get_genotype(c, id));
         let bytes = bytes.ok_or(axum::http::StatusCode::NOT_FOUND)?;

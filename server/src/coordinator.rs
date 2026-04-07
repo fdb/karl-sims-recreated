@@ -222,12 +222,8 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
 
         // Prepare next generation.
         let next_gen = cur_gen + 1;
-        timed_db("coord.update_gen", &db, |c| {
-            update_evolution(c, evo_id, "running", next_gen as i64)
-        });
 
         // ── Migration: ring topology, every `migration_interval` gens ───
-        // best_of[i] = island i's elite (to be shipped to island (i+1)%N)
         let migration_active = num_islands > 1
             && params.migration_interval > 0
             && next_gen > 0
@@ -244,117 +240,123 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
             log::info!("Evolution {evo_id} Gen {next_gen}: migrating elites along ring");
         }
 
-        // ── Per-island reproduction ─────────────────────────────────────
-        for island_id in 0..num_islands {
-            let individuals = &island_individuals[island_id];
-            if individuals.is_empty() {
-                continue;
-            }
+        // ── All-islands reproduction in a single transaction ───────────
+        //
+        // Previously each insert was its own autocommit — ~400 separate
+        // writer-lock acquisitions per generation, each fighting workers'
+        // complete_task UPDATEs. Workers that lost the fight waited in
+        // busy_timeout, holding their pool connections, starving API reads.
+        //
+        // A single transaction takes the writer lock ONCE, does all inserts,
+        // commits. Workers see SQLITE_BUSY for ~10ms (the whole batch) not
+        // ~400× 1ms (the old thundering-herd pattern). Net write time is
+        // also dramatically lower because there's only one WAL fsync.
+        timed_db("coord.reproduce_gen", &db, |conn| {
+            conn.execute_batch("BEGIN IMMEDIATE").expect("begin txn");
 
-            // Select survivors (top survival_ratio of this island).
-            let num_survivors = (config.survival_ratio * individuals.len() as f64)
-                .ceil() as usize;
-            let survivors: Vec<GenomeGraph> = individuals
-                [..num_survivors.min(individuals.len())]
-                .iter()
-                .map(|(g, _)| g.clone())
-                .collect();
-            let survivor_fitnesses: Vec<f64> = individuals
-                [..num_survivors.min(individuals.len())]
-                .iter()
-                .map(|(_, f)| *f)
-                .collect();
-            if survivors.is_empty() {
-                continue;
-            }
+            update_evolution(conn, evo_id, "running", next_gen as i64);
 
-            let mut offspring_count = 0usize;
+            for island_id in 0..num_islands {
+                let individuals = &island_individuals[island_id];
+                if individuals.is_empty() {
+                    continue;
+                }
 
-            // Inbound migrant from previous island (ring topology).
-            let migrant = if migration_active {
-                let src = (island_id + num_islands - 1) % num_islands;
-                best_of[src].clone()
-            } else {
-                None
-            };
-            if let Some((genome, fitness)) = &migrant {
-                let bytes = bincode::serialize(genome).unwrap();
-                // Each call is a fresh pool acquire + 2 inserts (genotype +
-                // completed-task row) in its own autocommit. This is exactly
-                // the pattern that batching-in-transaction would replace.
-                timed_db("coord.insert_survivor", &db, |c| {
-                    insert_genotype_with_fitness(
-                        c, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
-                    );
-                });
-                offspring_count += 1;
-            }
+                let num_survivors = (config.survival_ratio * individuals.len() as f64)
+                    .ceil() as usize;
+                let survivors: Vec<GenomeGraph> = individuals
+                    [..num_survivors.min(individuals.len())]
+                    .iter()
+                    .map(|(g, _)| g.clone())
+                    .collect();
+                let survivor_fitnesses: Vec<f64> = individuals
+                    [..num_survivors.min(individuals.len())]
+                    .iter()
+                    .map(|(_, f)| *f)
+                    .collect();
+                if survivors.is_empty() {
+                    continue;
+                }
 
-            // Keep survivors with their existing fitness (no re-evaluation needed).
-            for (genome, fitness) in survivors.iter().zip(survivor_fitnesses.iter()) {
-                if offspring_count >= per_island_pop { break; }
-                let bytes = bincode::serialize(genome).unwrap();
-                timed_db("coord.insert_survivor", &db, |c| {
-                    insert_genotype_with_fitness(
-                        c, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
-                    );
-                });
-                offspring_count += 1;
-            }
+                let mut offspring_count = 0usize;
 
-            // Random injection every INJECTION_INTERVAL gens.
-            const INJECTION_INTERVAL: usize = 10;
-            const INJECTION_FRACTION: f64 = 0.10;
-            let inject_count = if next_gen > 0 && next_gen % INJECTION_INTERVAL == 0 {
-                (per_island_pop as f64 * INJECTION_FRACTION).round() as usize
-            } else {
-                0
-            };
-            for _ in 0..inject_count {
-                if offspring_count >= per_island_pop { break; }
-                let child = GenomeGraph::random(&mut rng);
-                let bytes = bincode::serialize(&child).unwrap();
-                timed_db("coord.insert_offspring", &db, |c| {
-                    let gid = insert_genotype(
-                        c, evo_id, next_gen as i64, &bytes, None, island_id as i64,
-                    );
-                    create_task(c, evo_id, gid);
-                });
-                offspring_count += 1;
-            }
-
-            // Fill remaining slots with offspring.
-            while offspring_count < per_island_pop {
-                let roll: f64 = rng.r#gen();
-                let child = if roll < config.asexual_ratio {
-                    let parent = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                    let mut child = parent.clone();
-                    karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
-                    child
-                } else if roll < config.asexual_ratio + config.crossover_ratio {
-                    let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                    let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                    let mut child = karl_sims_core::mating::crossover(p1, p2, &mut rng);
-                    karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
-                    child
+                // Inbound migrant from previous island (ring topology).
+                let migrant = if migration_active {
+                    let src = (island_id + num_islands - 1) % num_islands;
+                    best_of[src].clone()
                 } else {
-                    let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                    let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
-                    let mut child = karl_sims_core::mating::graft(p1, p2, &mut rng);
-                    karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
-                    child
+                    None
                 };
-
-                let bytes = bincode::serialize(&child).unwrap();
-                timed_db("coord.insert_offspring", &db, |c| {
-                    let gid = insert_genotype(
-                        c, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                if let Some((genome, fitness)) = &migrant {
+                    let bytes = bincode::serialize(genome).unwrap();
+                    insert_genotype_with_fitness(
+                        conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
                     );
-                    create_task(c, evo_id, gid);
-                });
-                offspring_count += 1;
+                    offspring_count += 1;
+                }
+
+                // Keep survivors with their existing fitness.
+                for (genome, fitness) in survivors.iter().zip(survivor_fitnesses.iter()) {
+                    if offspring_count >= per_island_pop { break; }
+                    let bytes = bincode::serialize(genome).unwrap();
+                    insert_genotype_with_fitness(
+                        conn, evo_id, next_gen as i64, &bytes, *fitness, island_id as i64,
+                    );
+                    offspring_count += 1;
+                }
+
+                // Random injection every INJECTION_INTERVAL gens.
+                const INJECTION_INTERVAL: usize = 10;
+                const INJECTION_FRACTION: f64 = 0.10;
+                let inject_count = if next_gen > 0 && next_gen % INJECTION_INTERVAL == 0 {
+                    (per_island_pop as f64 * INJECTION_FRACTION).round() as usize
+                } else {
+                    0
+                };
+                for _ in 0..inject_count {
+                    if offspring_count >= per_island_pop { break; }
+                    let child = GenomeGraph::random(&mut rng);
+                    let bytes = bincode::serialize(&child).unwrap();
+                    let gid = insert_genotype(
+                        conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                    );
+                    create_task(conn, evo_id, gid);
+                    offspring_count += 1;
+                }
+
+                // Fill remaining slots with offspring.
+                while offspring_count < per_island_pop {
+                    let roll: f64 = rng.r#gen();
+                    let child = if roll < config.asexual_ratio {
+                        let parent = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                        let mut child = parent.clone();
+                        karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
+                        child
+                    } else if roll < config.asexual_ratio + config.crossover_ratio {
+                        let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                        let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                        let mut child = karl_sims_core::mating::crossover(p1, p2, &mut rng);
+                        karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
+                        child
+                    } else {
+                        let p1 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                        let p2 = pick_weighted(&survivors, &survivor_fitnesses, &mut rng);
+                        let mut child = karl_sims_core::mating::graft(p1, p2, &mut rng);
+                        karl_sims_core::mutation::mutate_with_signals(&mut child, &mut rng, params.num_signal_channels);
+                        child
+                    };
+
+                    let bytes = bincode::serialize(&child).unwrap();
+                    let gid = insert_genotype(
+                        conn, evo_id, next_gen as i64, &bytes, None, island_id as i64,
+                    );
+                    create_task(conn, evo_id, gid);
+                    offspring_count += 1;
+                }
             }
-        }
+
+            conn.execute_batch("COMMIT").expect("commit txn");
+        });
 
         cur_gen += 1;
     }
