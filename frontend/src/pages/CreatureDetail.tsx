@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import {
   getGenotypeInfo,
   getGenomeBytes,
@@ -45,28 +45,8 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
   const [goal, setGoal] = useState<"SwimmingSpeed" | "LightFollowing">("SwimmingSpeed");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [exportDone, setExportDone] = useState(false);
-
-  // Check for ?export=video URL param
+  // Check for ?export=video URL param (used by Playwright/CLI capture)
   const autoExport = new URLSearchParams(window.location.search).get("export") === "video";
-
-  const handleExport = useCallback(() => {
-    setExporting(true);
-    setExportDone(false);
-  }, []);
-
-  const handleVideoExported = useCallback((blob: Blob, _filename: string) => {
-    // Auto-download as WebM
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `creature-${creatureId}.webm`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setExporting(false);
-    setExportDone(true);
-  }, [creatureId]);
 
   useEffect(() => {
     (async () => {
@@ -157,23 +137,21 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
                 genomeBytes={genomeBytes}
                 environment={environment}
                 goal={goal}
-                exportVideo={exporting || (autoExport && !exportDone)}
-                onVideoExported={handleVideoExported}
+                exportVideo={autoExport}
               />
             )}
           </div>
         </div>
         <div className="lg:col-span-2 flex items-center gap-3">
-          <button
-            onClick={handleExport}
-            disabled={exporting || !genomeBytes}
-            className="px-3 py-1.5 text-sm rounded border border-border-subtle hover:bg-bg-surface transition-colors disabled:opacity-50"
+          <a
+            href={`?export=video`}
+            className="px-3 py-1.5 text-sm rounded border border-border-subtle hover:bg-bg-surface transition-colors inline-block"
           >
-            {exporting ? "Exporting…" : exportDone ? "✓ Export again" : "Export 10s Video (.webm)"}
-          </button>
-          {exportDone && (
-            <span className="text-sm text-success">Video downloaded!</span>
-          )}
+            Export 10s Video (.mp4)
+          </a>
+          <span className="text-xs text-text-muted">
+            Use <code>tools/capture-video.sh {evoId} {creatureId}</code> for CLI export
+          </span>
         </div>
         <div className="lg:col-span-1 space-y-4 lg:overflow-y-auto lg:max-h-[calc(100vh-200px)]">
           {info && (

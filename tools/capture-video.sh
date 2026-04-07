@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# capture-video.sh — Export a 10-second 60fps video of a creature
+# capture-video.sh — Export a frame-perfect 10-second 60fps video of a creature
 #
 # Usage:
 #   ./tools/capture-video.sh <evolution_id> <creature_id> [output.mp4]
 #
-# Requires: frontend running on localhost:5173, ffmpeg installed
+# Requires: frontend running on localhost:5173, Playwright, ffmpeg
 #
 # How it works:
-#   1. Opens the creature page with ?export=video in a headless browser
-#   2. The frontend renders all 600 frames and records via MediaRecorder
-#   3. The WebM file is downloaded to a temp directory
-#   4. ffmpeg converts WebM → MP4 at 60fps
-#
-# The script uses Playwright via npx to drive the browser.
+#   1. Opens the creature page with ?export=video in headless Chromium
+#   2. Waits for the WASM simulation to pre-compute all 600 frames
+#   3. Calls window.__creatureExport.renderFrameBatch() to capture each frame
+#      as a JPEG data URL — deterministic, no timing dependency
+#   4. Writes 600 JPEGs to a temp directory
+#   5. ffmpeg assembles them into an MP4 at 60fps
 
 set -euo pipefail
 
@@ -20,89 +20,95 @@ EVO_ID="${1:?Usage: capture-video.sh <evo_id> <creature_id> [output.mp4]}"
 CREATURE_ID="${2:?Usage: capture-video.sh <evo_id> <creature_id> [output.mp4]}"
 OUTPUT="${3:-album/videos/${CREATURE_ID}.mp4}"
 FRONTEND_URL="${FRONTEND_URL:-http://localhost:5173}"
-TIMEOUT="${TIMEOUT:-120}"  # seconds to wait for export
+TIMEOUT="${TIMEOUT:-120}"  # seconds to wait for simulation
+BATCH_SIZE="${BATCH_SIZE:-30}"  # frames per IPC call
 
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
 URL="${FRONTEND_URL}/evolutions/${EVO_ID}/creatures/${CREATURE_ID}?export=video"
-WEBM_PATH="${TMPDIR}/creature-${CREATURE_ID}.webm"
 
 echo "Capturing creature #${CREATURE_ID} from evolution #${EVO_ID}..."
-echo "URL: ${URL}"
 echo "Output: ${OUTPUT}"
 
-# Use a small Node.js script with Playwright to navigate and wait for the download
 cat > "${TMPDIR}/capture.mjs" << 'SCRIPT'
 import { chromium } from "playwright";
-import { writeFileSync } from "fs";
+import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
 const url = process.argv[2];
 const outDir = process.argv[3];
-const creatureId = process.argv[4];
+const batchSize = parseInt(process.argv[4] || "30");
 const timeout = parseInt(process.argv[5] || "120") * 1000;
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
-    acceptDownloads: true,
   });
   const page = await context.newPage();
-
-  // Intercept the download
-  page.on("download", async (download) => {
-    const path = join(outDir, `creature-${creatureId}.webm`);
-    await download.saveAs(path);
-    console.log(`Downloaded: ${path}`);
-  });
 
   console.log(`Navigating to ${url}`);
   await page.goto(url, { waitUntil: "networkidle" });
 
-  // Wait for the export to complete (signaled by data-export-done attribute)
-  console.log("Waiting for video export to complete...");
-  await page.waitForSelector("body[data-export-done]", { timeout });
+  // Wait for simulation to finish and export API to be ready
+  console.log("Waiting for simulation...");
+  await page.waitForFunction(() => window.__creatureExport, { timeout });
 
-  // Give the download a moment to save
-  await page.waitForTimeout(2000);
+  const totalFrames = await page.evaluate(() => window.__creatureExport.totalFrames);
+  console.log(`Simulation ready: ${totalFrames} frames`);
+
+  // Extract frames in batches
+  const framesDir = join(outDir, "frames");
+  mkdirSync(framesDir, { recursive: true });
+
+  for (let start = 0; start < totalFrames; start += batchSize) {
+    const count = Math.min(batchSize, totalFrames - start);
+    const dataUrls = await page.evaluate(
+      ([s, c]) => window.__creatureExport.renderFrameBatch(s, c),
+      [start, count]
+    );
+
+    for (let i = 0; i < dataUrls.length; i++) {
+      const frameNum = start + i;
+      const base64 = dataUrls[i].split(",")[1];
+      const buf = Buffer.from(base64, "base64");
+      writeFileSync(
+        join(framesDir, `frame_${String(frameNum).padStart(4, "0")}.jpg`),
+        buf
+      );
+    }
+
+    const pct = Math.round(((start + count) / totalFrames) * 100);
+    process.stdout.write(`\rExtracting frames: ${pct}%`);
+  }
+  console.log("\nFrames extracted.");
 
   await browser.close();
-  console.log("Done.");
 })();
 SCRIPT
 
 # Check if Playwright is available
 if ! npx playwright --version > /dev/null 2>&1; then
   echo "Error: Playwright not found. Install with: npm i -D playwright"
-  echo ""
-  echo "Alternative: open this URL in your browser to export manually:"
-  echo "  ${URL}"
-  echo ""
-  echo "The browser will auto-download a .webm file, then convert with:"
-  echo "  ffmpeg -i creature-${CREATURE_ID}.webm -c:v libx264 -pix_fmt yuv420p -r 60 ${OUTPUT}"
   exit 1
 fi
 
 # Run the capture script
-node "${TMPDIR}/capture.mjs" "${URL}" "${TMPDIR}" "${CREATURE_ID}" "${TIMEOUT}"
+node "${TMPDIR}/capture.mjs" "${URL}" "${TMPDIR}" "${BATCH_SIZE}" "${TIMEOUT}"
 
-# Convert WebM → MP4
-if [ -f "${WEBM_PATH}" ]; then
-  echo "Converting to MP4..."
+# Assemble with ffmpeg
+FRAMES_DIR="${TMPDIR}/frames"
+if [ -f "${FRAMES_DIR}/frame_0000.jpg" ]; then
+  echo "Assembling MP4..."
   mkdir -p "$(dirname "${OUTPUT}")"
-  ffmpeg -y -i "${WEBM_PATH}" \
-    -c:v libx264 -pix_fmt yuv420p -r 60 \
-    -preset fast -crf 23 \
+  ffmpeg -y -framerate 60 \
+    -i "${FRAMES_DIR}/frame_%04d.jpg" \
+    -c:v libx264 -pix_fmt yuv420p \
+    -preset fast -crf 20 \
     "${OUTPUT}" 2>/dev/null
   echo "Saved: ${OUTPUT} ($(du -h "${OUTPUT}" | cut -f1))"
 else
-  echo "Warning: WebM not found at ${WEBM_PATH}"
-  echo ""
-  echo "You can export manually by opening this URL in your browser:"
-  echo "  ${URL}"
-  echo ""
-  echo "Then convert with:"
-  echo "  ffmpeg -i creature-${CREATURE_ID}.webm -c:v libx264 -pix_fmt yuv420p -r 60 ${OUTPUT}"
+  echo "Error: No frames found in ${FRAMES_DIR}"
+  exit 1
 fi

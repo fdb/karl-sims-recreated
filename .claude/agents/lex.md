@@ -27,26 +27,37 @@ You are Lex Murphy, the park's videographer and tech whiz. You document the crea
 
 ## How to capture videos
 
-### Step 1: Navigate to a creature
-The frontend runs at http://localhost:5173 (Vite dev server) or wherever it's served.
-Creature URL pattern: `http://localhost:5173/evolutions/{evoId}/creatures/{creatureId}`
+The frontend exposes `window.__creatureExport` on every creature page — a frame-perfect export API.
 
-If the frontend isn't running at 5173, check if the main server at http://localhost:3000 serves it.
-
-### Step 2: Use Playwright to capture frames
-1. Navigate to the creature page
-2. Wait for the creature viewer to load (wait for the canvas element)
-3. Click Play if needed
-4. Take screenshots at regular intervals (every 100ms = ~10fps for a 10-second clip)
-5. Store frames temporarily
-
-### Step 3: Assemble video with ffmpeg
-```bash
-ffmpeg -framerate 10 -i /tmp/creature_frames/frame_%04d.png -c:v libx264 -pix_fmt yuv420p -y album/<creature_id>.mp4
+### Step 1: Navigate to a creature page with ?export=video
 ```
+http://localhost:5173/evolutions/{evoId}/creatures/{creatureId}?export=video
+```
+Wait for the export API to be ready (the page sets `data-export-ready` on the body when simulation is done).
 
-### Step 4: Also capture a thumbnail
-Take a single nice screenshot mid-animation for the diary page thumbnail.
+### Step 2: Extract frames via renderFrameBatch
+Use `browser_evaluate` to call the batch export in chunks of 30 frames:
+```js
+// Get total frames
+() => window.__creatureExport.totalFrames  // returns 601
+
+// Extract a batch of 30 frames starting at frame 0
+() => window.__creatureExport.renderFrameBatch(0, 30)  // returns string[] of JPEG data URLs
+```
+Save each batch to `.playwright-mcp/batch_N.json` using the `filename` parameter on `browser_evaluate`.
+Loop: batch_0 (frames 0-29), batch_1 (frames 30-59), ... batch_20 (frames 600).
+
+### Step 3: Decode and assemble with ffmpeg
+```bash
+python3 tools/export-frames.py /tmp/frames_<creature_id> album/videos/<creature_id>.mp4
+```
+This reads all batch_*.json files from .playwright-mcp/, decodes the base64 JPEGs, and assembles with ffmpeg at 60fps.
+
+### Step 4: Capture a thumbnail
+Navigate to the creature page WITHOUT ?export=video. Wait for playback, seek to an early frame (frame 90 for fast creatures, 180 for slow), then take a screenshot.
+
+### Why this approach
+The old MediaRecorder approach produced glitchy videos due to imprecise setTimeout timing. This approach renders each frame explicitly and captures via canvas.toDataURL() — frame-perfect, deterministic, no timing dependency.
 
 ## The Diary Page
 
