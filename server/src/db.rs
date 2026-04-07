@@ -488,6 +488,43 @@ pub fn get_genotype(conn: &Connection, genotype_id: i64) -> Option<Vec<u8>> {
     .ok()
 }
 
+/// Load an entire island's generation in a single query: returns
+/// `(genotype_id, fitness, genome_bytes)` for every completed creature.
+///
+/// This replaces the N+1 pattern of `get_generation_fitnesses_by_island`
+/// followed by N individual `get_genotype` calls. On a large WAL, each
+/// individual BLOB read scans WAL frames independently — 50 reads × 600MB
+/// WAL = catastrophic. A single query does one WAL scan for all rows.
+pub fn load_island_generation(
+    conn: &Connection,
+    evo_id: i64,
+    island_id: i64,
+    generation: i64,
+) -> Vec<(i64, f64, Vec<u8>)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT g.id, t.fitness, g.genome_bytes
+             FROM genotypes g
+             JOIN tasks t ON t.genotype_id = g.id
+             WHERE g.evolution_id = ?1
+               AND g.island_id = ?2
+               AND g.generation = ?3
+               AND t.status = 'completed'",
+        )
+        .expect("Failed to prepare load_island_generation");
+
+    stmt.query_map(params![evo_id, island_id, generation], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, Vec<u8>>(2)?,
+        ))
+    })
+    .expect("Failed to query island generation")
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
 /// Get the top genotypes by fitness for an evolution.
 /// Returns (id, fitness, genome_bytes, island_id).
 pub fn get_best_genotypes(

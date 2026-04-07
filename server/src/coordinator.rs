@@ -9,9 +9,10 @@ use karl_sims_core::genotype::GenomeGraph;
 use tokio::sync::broadcast;
 
 use crate::db::{
-    create_task, get_evolution_seed, get_evolution_status, get_evolution_full, get_genotype,
-    get_generation_fitnesses, get_generation_fitnesses_by_island, get_max_generations,
-    insert_genotype, insert_genotype_with_fitness, pending_task_count, update_evolution, DbPool,
+    create_task, get_evolution_seed, get_evolution_status, get_evolution_full,
+    get_generation_fitnesses, get_max_generations,
+    insert_genotype, insert_genotype_with_fitness, load_island_generation, pending_task_count,
+    update_evolution, DbPool,
 };
 use crate::timing::timed_db;
 
@@ -131,18 +132,17 @@ pub async fn run_evolution(db: DbPool, evo_id: i64, tx: Option<broadcast::Sender
         let mut island_individuals: Vec<Vec<(GenomeGraph, f64)>> =
             vec![Vec::new(); num_islands];
         for (island_id, bucket) in island_individuals.iter_mut().enumerate() {
-            // Per-island load: holds one connection across ~pop_per_island
-            // BLOB reads (`get_genotype` inside the loop). Tagging the whole
-            // block shows us how long a full generation-load takes.
+            // Single-query load: fetches fitness + genome_bytes together,
+            // replacing the previous N+1 pattern (1 fitness query + N BLOB
+            // reads). On a large WAL, the old N+1 pattern scanned WAL frames
+            // independently for each BLOB read, causing 8-18s load times.
             timed_db("coord.load_gen", &db, |conn| {
-                let pairs = get_generation_fitnesses_by_island(
+                let rows = load_island_generation(
                     conn, evo_id, island_id as i64, cur_gen as i64,
                 );
-                for (gid, fitness) in &pairs {
-                    if let Some(bytes) = get_genotype(conn, *gid) {
-                        if let Ok(genome) = bincode::deserialize(&bytes) {
-                            bucket.push((genome, *fitness));
-                        }
+                for (_gid, fitness, bytes) in &rows {
+                    if let Ok(genome) = bincode::deserialize(bytes) {
+                        bucket.push((genome, *fitness));
                     }
                 }
             });

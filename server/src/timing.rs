@@ -74,7 +74,20 @@ where
     F: FnOnce(&Connection) -> T,
 {
     let t_acq = Instant::now();
-    let conn: PooledConnection<SqliteConnectionManager> = db.get().expect("pool get");
+    let conn: PooledConnection<SqliteConnectionManager> = match db.get() {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("[POOL EXHAUSTED] {label}: {e} (waited {:.1}s)",
+                t_acq.elapsed().as_secs_f64());
+            // Retry once after a short backoff — the pool may free up if a
+            // long-running query (e.g. coord.load_gen on a bloated WAL) finishes.
+            std::thread::sleep(Duration::from_millis(500));
+            db.get().unwrap_or_else(|e2| {
+                panic!("[POOL EXHAUSTED] {label}: retry also failed after {:.1}s: {e2}",
+                    t_acq.elapsed().as_secs_f64())
+            })
+        }
+    };
     let acquire = t_acq.elapsed();
     let t_query = Instant::now();
     let result = f(&conn);
@@ -99,7 +112,18 @@ where
     tokio::task::spawn_blocking(move || {
         let dispatch = t_spawn.elapsed();
         let t_acq = Instant::now();
-        let conn = db.get().expect("pool get");
+        let conn = match db.get() {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("[POOL EXHAUSTED] {label}: {e} (waited {:.1}s)",
+                    t_acq.elapsed().as_secs_f64());
+                std::thread::sleep(Duration::from_millis(500));
+                db.get().unwrap_or_else(|e2| {
+                    panic!("[POOL EXHAUSTED] {label}: retry also failed after {:.1}s: {e2}",
+                        t_acq.elapsed().as_secs_f64())
+                })
+            }
+        };
         let acquire = t_acq.elapsed();
         let t_query = Instant::now();
         let result = f(&conn);
@@ -192,18 +216,95 @@ fn fmt_pct(pct: Option<(u64, u64)>) -> String {
     }
 }
 
-/// Spawn a thread that logs the WAL file size every `WAL_INTERVAL`. If the
-/// WAL grows unboundedly, autocheckpoint is falling behind — a classic
-/// symptom of sustained write pressure. Under healthy operation WAL stays
-/// under a few MB and resets on checkpoint.
+/// Spawn a thread that monitors the WAL file size and runs periodic
+/// PASSIVE checkpoints. Under sustained write + read load, SQLite's
+/// autocheckpoint can't run because readers hold WAL snapshots (e.g.
+/// `coord.load_gen` holding a connection for 8-18s). Without explicit
+/// checkpointing, the WAL grows unboundedly (observed: 619 MB), making
+/// every read scan hundreds of MB of WAL frames — a death spiral.
+///
+/// PASSIVE checkpoint moves committed WAL pages to the main DB file
+/// without blocking writers or waiting for readers. It won't shrink the
+/// WAL to zero if there are active readers, but it prevents unbounded
+/// growth by checkpointing whatever frames are no longer pinned.
+///
+/// Every `CHECKPOINT_INTERVAL` we run a PASSIVE checkpoint. Every
+/// `WAL_INTERVAL` we also log the WAL size for monitoring. Every
+/// `TRUNCATE_INTERVAL` we attempt a TRUNCATE checkpoint to actually
+/// reclaim disk space — this may fail if readers are active, which is
+/// fine (PASSIVE keeps the WAL bounded in the meantime).
+const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
+const TRUNCATE_INTERVAL: Duration = Duration::from_secs(60);
+
 pub fn spawn_wal_monitor(db_path: String) {
     std::thread::spawn(move || {
         let wal_path = format!("{db_path}-wal");
+        // Dedicated connection for checkpointing — not from the pool, so it
+        // doesn't compete with workers/coordinator for pool slots.
+        let ckpt_conn = match rusqlite::Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("[WAL] Failed to open checkpoint connection: {e}");
+                return;
+            }
+        };
+        // WAL mode + short busy timeout (we don't want to block if a writer is active)
+        ckpt_conn
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=1000;")
+            .ok();
+
+        let mut last_log = Instant::now();
+        let mut last_truncate = Instant::now();
         loop {
-            std::thread::sleep(WAL_INTERVAL);
-            if let Ok(meta) = std::fs::metadata(&wal_path) {
-                let mb = meta.len() as f64 / 1_048_576.0;
-                log::info!("[WAL] {wal_path}: {mb:.2} MB");
+            std::thread::sleep(CHECKPOINT_INTERVAL);
+
+            // Run PASSIVE checkpoint — never blocks.
+            match ckpt_conn.query_row(
+                "PRAGMA wal_checkpoint(PASSIVE)",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i32>(0)?, // busy (0=ok, 1=blocked)
+                        row.get::<_, i32>(1)?, // total WAL pages
+                        row.get::<_, i32>(2)?, // checkpointed pages
+                    ))
+                },
+            ) {
+                Ok((_busy, total, checkpointed)) => {
+                    if total > 0 && total != checkpointed {
+                        log::debug!(
+                            "[WAL] PASSIVE: {checkpointed}/{total} pages checkpointed"
+                        );
+                    }
+                }
+                Err(e) => log::warn!("[WAL] PASSIVE checkpoint failed: {e}"),
+            }
+
+            // Periodically attempt TRUNCATE to reclaim disk space.
+            if last_truncate.elapsed() >= TRUNCATE_INTERVAL {
+                last_truncate = Instant::now();
+                match ckpt_conn.query_row(
+                    "PRAGMA wal_checkpoint(TRUNCATE)",
+                    [],
+                    |row| Ok(row.get::<_, i32>(0)?),
+                ) {
+                    Ok(0) => log::info!("[WAL] TRUNCATE checkpoint succeeded"),
+                    Ok(_) => log::debug!("[WAL] TRUNCATE blocked by readers (OK, PASSIVE keeps WAL bounded)"),
+                    Err(e) => log::warn!("[WAL] TRUNCATE checkpoint failed: {e}"),
+                }
+            }
+
+            // Log WAL size periodically.
+            if last_log.elapsed() >= WAL_INTERVAL {
+                last_log = Instant::now();
+                if let Ok(meta) = std::fs::metadata(&wal_path) {
+                    let mb = meta.len() as f64 / 1_048_576.0;
+                    if mb > 10.0 {
+                        log::warn!("[WAL] {wal_path}: {mb:.2} MB (elevated)");
+                    } else {
+                        log::info!("[WAL] {wal_path}: {mb:.2} MB");
+                    }
+                }
             }
         }
     });
