@@ -38,6 +38,9 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
   const totalFramesRef = useRef(TOTAL_FRAMES);
   const meshesRef = useRef<THREE.Mesh[]>([]);
   const lightPositionsRef = useRef<[number, number, number][]>([]);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -81,8 +84,11 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       renderer.shadowMap.type = THREE.PCFShadowMap;
       mount.appendChild(renderer.domElement);
       rendererRef.current = renderer;
+      sceneRef.current = scene;
+      cameraRef.current = camera;
 
       const controls = new OrbitControls(camera, renderer.domElement);
+      controlsRef.current = controls;
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.minDistance = 0.3;
@@ -291,67 +297,6 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       setNanFrame(firstNanFrame);
       setHasNan(firstNanFrame !== null);
 
-      // --- Video export mode ---
-      if (exportVideo) {
-        // Record the canvas at 60fps in real-time using MediaRecorder.
-        // We pace frames at ~16.67ms intervals so the resulting WebM
-        // has correct 10-second duration.
-        const canvas = renderer.domElement;
-        const stream = canvas.captureStream(60);
-        const chunks: Blob[] = [];
-        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-          ? "video/webm;codecs=vp9"
-          : "video/webm";
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          videoBitsPerSecond: 8_000_000,
-        });
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) chunks.push(e.data);
-        };
-
-        const exportDone = new Promise<Blob>((resolve) => {
-          recorder.onstop = () => {
-            resolve(new Blob(chunks, { type: "video/webm" }));
-          };
-        });
-
-        recorder.start();
-
-        // Render each frame paced at 60fps (16.67ms per frame = 10s total)
-        const frameDelay = 1000 / 60;
-        for (let f = 0; f < allFrames.length; f++) {
-          const t0 = performance.now();
-          applyTransforms(allFrames[f], meshes);
-          if (lightSphere && allLightPositions.length > 0) {
-            const lp = allLightPositions[Math.min(f, allLightPositions.length - 1)];
-            if (lp) lightSphere.position.set(lp[0], lp[1], lp[2]);
-          }
-          controls.update();
-          renderer.render(scene, camera);
-          // Wait the remainder of the frame budget so MediaRecorder sees real-time pacing
-          const elapsed = performance.now() - t0;
-          const wait = Math.max(0, frameDelay - elapsed);
-          await new Promise<void>((r) => setTimeout(r, wait));
-        }
-
-        recorder.stop();
-        const blob = await exportDone;
-
-        if (onVideoExported) {
-          onVideoExported(blob, "creature.webm");
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = "creature.webm";
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-        document.body.setAttribute("data-export-done", "true");
-        return; // Don't start the playback loop in export mode
-      }
-
       // --- Playback animation loop ---
       const animate = () => {
         animIdRef.current = requestAnimationFrame(animate);
@@ -392,6 +337,66 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       lightPositionsRef.current = [];
     };
   }, [genomeBytes, environment, goal]);
+
+  // --- Separate effect for video export (triggers when exportVideo flips to true) ---
+  useEffect(() => {
+    if (!exportVideo) return;
+    if (isComputing) return;
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const allFrames = framesRef.current;
+    const meshes = meshesRef.current;
+    if (!renderer || !scene || !camera || allFrames.length === 0 || meshes.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      isPlayingRef.current = false;
+
+      const stream = renderer.domElement.captureStream(60);
+      const chunks: Blob[] = [];
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+        ? "video/webm;codecs=vp9"
+        : "video/webm";
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      const exportDone = new Promise<Blob>((resolve) => {
+        recorder.onstop = () => resolve(new Blob(chunks, { type: "video/webm" }));
+      });
+
+      recorder.start();
+      const frameDelay = 1000 / 60;
+      for (let f = 0; f < allFrames.length && !cancelled; f++) {
+        const t0 = performance.now();
+        applyTransforms(allFrames[f], meshes);
+        if (controls) controls.update();
+        renderer.render(scene, camera);
+        const elapsed = performance.now() - t0;
+        await new Promise<void>((r) => setTimeout(r, Math.max(0, frameDelay - elapsed)));
+      }
+      if (cancelled) { recorder.stop(); return; }
+
+      recorder.stop();
+      const blob = await exportDone;
+
+      if (onVideoExported) {
+        onVideoExported(blob, "creature.webm");
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "creature.webm";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      document.body.setAttribute("data-export-done", "true");
+      isPlayingRef.current = true;
+    })();
+
+    return () => { cancelled = true; };
+  }, [exportVideo, isComputing, onVideoExported]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
