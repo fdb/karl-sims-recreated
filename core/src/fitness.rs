@@ -115,6 +115,22 @@ pub struct EvolutionParams {
     /// Default: 1.0 s.
     #[serde(default = "default_settle_duration")]
     pub settle_duration: Option<f64>,
+    /// Maximum plausible per-DOF joint angular velocity, in rad/s. A creature
+    /// is rejected (fitness=0) if ANY joint DOF exceeds this rate at any frame
+    /// during post-settle evaluation.
+    ///
+    /// Sims 1994: no joint-velocity rejection — joint speeds emerge from
+    /// actuator torques, damping, and inertia.
+    /// Our variant: Rapier's PGS solver + high-torque effectors allow joints
+    /// to oscillate at 15-20+ rad/s, producing nearly invisible limb motion
+    /// that exploits ground friction for "sliding" locomotion (creature
+    /// 1827790 / evo 21 pattern). Capping joint angular velocity forces
+    /// evolution to use visible, biologically-plausible gaits.
+    /// Default: 12 rad/s (≈ 2 rev/s) — allows vigorous flapping and fast
+    /// gaits while rejecting supersonic-flipper exploits.
+    /// Set to `None` to disable (paper-faithful).
+    #[serde(default = "default_max_joint_angular_velocity")]
+    pub max_joint_angular_velocity: Option<f64>,
     /// Number of shared broadcast signal channels for inter-body neural
     /// communication. Each creature gets this many shared float channels
     /// that any body-part brain can read from (`NeuronInput::Signal`) or
@@ -147,6 +163,7 @@ fn default_max_body_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_num_islands() -> usize { 1 }
 fn default_migration_interval() -> usize { 20 }
 fn default_min_joint_motion() -> Option<f64> { Some(0.15) }
+fn default_max_joint_angular_velocity() -> Option<f64> { Some(12.0) }
 fn default_settle_duration() -> Option<f64> { Some(1.0) }
 fn default_num_signal_channels() -> usize { 4 }
 
@@ -172,6 +189,7 @@ impl Default for EvolutionParams {
             settle_duration: Some(1.0),
             num_signal_channels: 4,
             growth_interval: None,
+            max_joint_angular_velocity: Some(12.0),
         }
     }
 }
@@ -412,10 +430,31 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
             }
         }
 
-        // Skip Welford joint-angle stats during settle: we only care about
-        // joint motion AFTER the creature has landed. Otherwise landing
-        // impacts can spuriously inflate window stddev for frozen joints.
-        if settle_enabled && actual_settle_steps == 0 { continue; }
+        // Per-DOF joint angular velocity check (configurable, non-paper).
+        // Reject creatures with joints spinning faster than the cap — the
+        // creature 1827790 "invisible flipper" exploit pattern. We skip
+        // this during settle because landing impacts can cause transient
+        // high joint velocities that aren't representative of the gait.
+        if settle_enabled && actual_settle_steps == 0 {
+            // Still in settle — skip joint velocity AND Welford checks.
+            continue;
+        }
+        if let Some(max_jvel) = params.max_joint_angular_velocity {
+            for joint in creature.world.joints.iter() {
+                for dof in 0..joint.joint_type.dof_count() {
+                    let jvel = joint.velocities[dof].abs();
+                    if jvel > max_jvel {
+                        return FitnessResult {
+                            score: 0.0,
+                            distance: 0.0,
+                            max_displacement: 0.0,
+                            terminated_early: true,
+                        };
+                    }
+                }
+            }
+        }
+
         // Also skip the very frame where settle ends (step+1 == actual_settle_steps)
         // because we just reset initial_pos above; joint sampling starts next frame.
 
@@ -1099,6 +1138,7 @@ mod tests {
             settle_duration: Some(1.0),
             num_signal_channels: 0,
             growth_interval: None,
+            max_joint_angular_velocity: None, // disable by default in existing tests
         }
     }
 
@@ -1333,6 +1373,7 @@ mod tests {
             settle_duration: Some(1.0),
             num_signal_channels: 4,
             growth_interval: Some(60),
+            max_joint_angular_velocity: Some(12.0),
         };
 
         for seed in 0..30u64 {
@@ -1341,5 +1382,98 @@ mod tests {
             let result = evaluate_fitness(&genome, &params);
             assert!(result.score.is_finite(), "seed {seed}: fitness must be finite");
         }
+    }
+
+    // ── max_joint_angular_velocity tests ──────────────────────────────────
+
+    #[test]
+    fn fast_joint_gets_zero_fitness_with_joint_velocity_cap() {
+        // A high-frequency oscillator drives a revolute joint fast enough to
+        // exceed the 12 rad/s cap — the creature 1827790 "invisible flipper"
+        // exploit pattern. With the cap enabled, fitness must be zero.
+        let neurons = vec![BrainNode {
+            func: NeuronFunc::OscillateWave,
+            inputs: vec![
+                // High frequency → drives joint fast enough to exceed cap
+                (NeuronInput::Constant(8.0), 1.0),  // freq
+                (NeuronInput::Constant(0.0), 1.0),   // phase
+            ],
+        }];
+        let genome = two_body_genome(NeuronInput::Neuron(0), 1.0, neurons);
+
+        let mut params = land_params_with_motion(None); // disable min_joint_motion
+        params.max_joint_angular_velocity = Some(12.0);
+        params.sim_duration = 4.0;
+        let r_capped = evaluate_fitness(&genome, &params);
+
+        params.max_joint_angular_velocity = None;
+        let r_uncapped = evaluate_fitness(&genome, &params);
+
+        assert_eq!(
+            r_capped.score, 0.0,
+            "creature with fast-oscillating joint should score 0 when \
+             max_joint_angular_velocity is enabled"
+        );
+        assert!(
+            r_capped.terminated_early,
+            "fast joint should trigger early termination"
+        );
+        // Sanity: without cap, the creature gets nonzero fitness
+        assert!(
+            r_uncapped.score >= 0.0,
+            "uncapped creature should have valid fitness"
+        );
+    }
+
+    #[test]
+    fn slow_joint_passes_joint_velocity_cap() {
+        // A slow oscillator (freq=1.0) should stay well under 12 rad/s
+        // and should NOT be penalized by the joint velocity cap.
+        let neurons = vec![BrainNode {
+            func: NeuronFunc::OscillateWave,
+            inputs: vec![
+                (NeuronInput::Constant(1.0), 1.0),  // low freq
+                (NeuronInput::Constant(0.0), 1.0),
+            ],
+        }];
+        let genome = two_body_genome(NeuronInput::Neuron(0), 1.0, neurons);
+
+        let mut params = land_params_with_motion(None);
+        params.max_joint_angular_velocity = Some(12.0);
+        params.sim_duration = 4.0;
+        let r_capped = evaluate_fitness(&genome, &params);
+
+        params.max_joint_angular_velocity = None;
+        let r_uncapped = evaluate_fitness(&genome, &params);
+
+        // Scores should be identical — slow joint never triggers the cap
+        assert!(
+            (r_capped.score - r_uncapped.score).abs() < 1e-9,
+            "slow joint should not be affected by velocity cap; \
+             capped={:.4} uncapped={:.4}",
+            r_capped.score, r_uncapped.score
+        );
+    }
+
+    #[test]
+    fn joint_velocity_cap_disabled_when_none() {
+        // With max_joint_angular_velocity=None, even fast joints should
+        // not be rejected.
+        let neurons = vec![BrainNode {
+            func: NeuronFunc::OscillateWave,
+            inputs: vec![
+                (NeuronInput::Constant(8.0), 1.0),
+                (NeuronInput::Constant(0.0), 1.0),
+            ],
+        }];
+        let genome = two_body_genome(NeuronInput::Neuron(0), 1.0, neurons);
+
+        let mut params = land_params_with_motion(None);
+        params.max_joint_angular_velocity = None;
+        params.sim_duration = 4.0;
+        let result = evaluate_fitness(&genome, &params);
+
+        assert!(result.score.is_finite());
+        assert!(!result.terminated_early);
     }
 }

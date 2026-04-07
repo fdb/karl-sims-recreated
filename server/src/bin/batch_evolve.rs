@@ -52,6 +52,7 @@ fn main() {
         settle_duration: Some(1.0),
         num_signal_channels: 0,
         growth_interval: None,
+        max_joint_angular_velocity: Some(12.0),
     };
 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);

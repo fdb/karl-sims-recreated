@@ -176,6 +176,7 @@ async fn create_evolution(
         settle_duration: Some(1.0),
         num_signal_channels: req.num_signal_channels.unwrap_or(4),
         growth_interval: req.growth_interval,
+        max_joint_angular_velocity: Some(12.0),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {
