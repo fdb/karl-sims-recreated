@@ -1,35 +1,27 @@
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use karl_sims_core::fitness::{Environment, EvolutionParams, FitnessGoal};
 
 use crate::coordinator;
 use crate::db::{self, DbPool};
+use crate::engine::Engine;
 use crate::timing::{db_read_async, timed_db};
 use crate::ws::UpdateSender;
 
 #[derive(Clone)]
 pub struct AppState {
-    /// Write pool — used by coordinator, workers, and mutating API calls.
+    /// Write pool — used by coordinator and mutating API calls.
     pub db: DbPool,
-    /// Read-only pool — used by all GET API handlers. WAL readers never
-    /// contend for the writer lock, so this pool is completely isolated
-    /// from evolution write throughput.
+    /// Read-only pool — used only for genotype/phenotype endpoints.
     pub read_db: DbPool,
+    /// In-memory engine — all list/get/best/stats reads go here.
+    pub engine: Arc<Engine>,
     pub tx: UpdateSender,
-}
-
-#[derive(Serialize)]
-struct EvolutionInfo {
-    id: i64,
-    status: String,
-    generation: i64,
-    config: String,
-    created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -44,14 +36,8 @@ struct CreateEvolutionRequest {
     water_viscosity: Option<f64>,
     num_islands: Option<usize>,
     migration_interval: Option<usize>,
-    /// Joint-motion stddev threshold (radians). `None` to disable.
-    /// Default: 0.3. See `EvolutionParams::min_joint_motion`.
     min_joint_motion: Option<f64>,
-    /// Number of shared broadcast signal channels for inter-body communication.
-    /// Default: 4.
     num_signal_channels: Option<usize>,
-    /// Frames between growth events during developmental growth.
-    /// `None` for instant full development (paper-faithful).
     growth_interval: Option<usize>,
     name: Option<String>,
 }
@@ -122,28 +108,195 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-async fn list_evolutions(State(state): State<AppState>) -> Json<Vec<EvolutionInfo>> {
-    // All DB calls in handlers go through `spawn_blocking`. They are
-    // synchronous rusqlite calls, and we don't want them occupying a tokio
-    // runtime worker (which would block unrelated HTTP traffic).
-    // `db_read_async` measures all three latencies — see `timing.rs`.
-    let evos = db_read_async("api.list_evolutions", state.read_db.clone(), |c| {
-        db::list_evolutions(c)
-    })
-    .await;
+// ── Read endpoints: served from in-memory engine (zero DB) ──────────────
+
+async fn list_evolutions(State(state): State<AppState>) -> Json<Vec<serde_json::Value>> {
+    let snaps = state.engine.list_snapshots();
     Json(
-        evos.into_iter()
-            .map(|e| EvolutionInfo {
-                id: e.id,
-                status: e.status,
-                generation: e.current_gen,
-                config: e.config_json,
-                created_at: e.created_at,
-                name: e.name,
+        snaps
+            .into_iter()
+            .map(|s| {
+                let config = serde_json::from_str::<serde_json::Value>(&s.config_json)
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "id": s.id,
+                    "status": s.status,
+                    "generation": s.current_gen,
+                    "config": config,
+                    "created_at": s.created_at,
+                    "name": s.name,
+                })
             })
             .collect(),
     )
 }
+
+async fn get_evolution(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    match state.engine.get_snapshot(id) {
+        Some(s) => {
+            let config = serde_json::from_str::<serde_json::Value>(&s.config_json)
+                .unwrap_or_default();
+            Json(serde_json::json!({
+                "id": s.id,
+                "status": s.status,
+                "generation": s.current_gen,
+                "config": config,
+                "name": s.name,
+            }))
+        }
+        None => {
+            // Fallback to DB for evolutions not yet loaded into engine
+            let full = db_read_async("api.get_evolution", state.read_db.clone(), move |c| {
+                db::get_evolution_full(c, id)
+            })
+            .await;
+            match full {
+                Some((status, generation, config_json, name)) => {
+                    let config = serde_json::from_str::<serde_json::Value>(&config_json)
+                        .unwrap_or_default();
+                    Json(serde_json::json!({
+                        "id": id,
+                        "status": status,
+                        "generation": generation,
+                        "config": config,
+                        "name": name,
+                    }))
+                }
+                None => Json(serde_json::json!({"error": "not found"})),
+            }
+        }
+    }
+}
+
+async fn get_best(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<Vec<serde_json::Value>> {
+    if let Some(snap) = state.engine.get_snapshot(id) {
+        return Json(
+            snap.best_creatures
+                .into_iter()
+                .map(|c| serde_json::json!({"id": c.id, "fitness": c.fitness, "island_id": c.island_id}))
+                .collect(),
+        );
+    }
+    // Fallback to DB
+    let best = db_read_async("api.get_best", state.read_db.clone(), move |c| {
+        db::get_best_genotypes(c, id, 10)
+    })
+    .await;
+    Json(
+        best.into_iter()
+            .map(|(gid, fitness, _bytes, island_id)| {
+                serde_json::json!({"id": gid, "fitness": fitness, "island_id": island_id})
+            })
+            .collect(),
+    )
+}
+
+async fn get_best_per_island_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<Vec<serde_json::Value>> {
+    if let Some(snap) = state.engine.get_snapshot(id) {
+        return Json(
+            snap.best_per_island
+                .into_iter()
+                .map(|c| serde_json::json!({"id": c.id, "fitness": c.fitness, "island_id": c.island_id}))
+                .collect(),
+        );
+    }
+    let best = db_read_async("api.get_best_per_island", state.read_db.clone(), move |c| {
+        db::get_best_per_island(c, id)
+    })
+    .await;
+    Json(
+        best.into_iter()
+            .map(|(gid, fitness, island_id)| {
+                serde_json::json!({"id": gid, "fitness": fitness, "island_id": island_id})
+            })
+            .collect(),
+    )
+}
+
+async fn get_evolution_stats(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<Vec<serde_json::Value>> {
+    if let Some(snap) = state.engine.get_snapshot(id) {
+        return Json(
+            snap.gen_stats
+                .into_iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "generation": s.generation,
+                        "best_fitness": s.best_fitness,
+                        "avg_fitness": s.avg_fitness,
+                    })
+                })
+                .collect(),
+        );
+    }
+    let stats = db_read_async("api.get_evolution_stats", state.read_db.clone(), move |c| {
+        db::get_generation_stats(c, id)
+    })
+    .await;
+    Json(
+        stats
+            .into_iter()
+            .map(|(generation, best, avg)| {
+                serde_json::json!({
+                    "generation": generation,
+                    "best_fitness": best,
+                    "avg_fitness": avg,
+                })
+            })
+            .collect(),
+    )
+}
+
+async fn get_island_stats_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<Vec<serde_json::Value>> {
+    if let Some(snap) = state.engine.get_snapshot(id) {
+        return Json(
+            snap.island_stats
+                .into_iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "generation": s.generation,
+                        "island_id": s.island_id,
+                        "best_fitness": s.best_fitness,
+                        "avg_fitness": s.avg_fitness,
+                    })
+                })
+                .collect(),
+        );
+    }
+    let stats = db_read_async("api.get_island_stats", state.read_db.clone(), move |c| {
+        db::get_island_stats(c, id)
+    })
+    .await;
+    Json(
+        stats
+            .into_iter()
+            .map(|(generation, island_id, best, avg)| {
+                serde_json::json!({
+                    "generation": generation,
+                    "island_id": island_id,
+                    "best_fitness": best,
+                    "avg_fitness": avg,
+                })
+            })
+            .collect(),
+    )
+}
+
+// ── Mutation endpoints (still use DB for persistence) ───────────────────
 
 async fn create_evolution(
     State(state): State<AppState>,
@@ -169,12 +322,9 @@ async fn create_evolution(
         max_body_angular_velocity: Some(20.0),
         num_islands: req.num_islands.unwrap_or(1).clamp(1, 12),
         migration_interval: req.migration_interval.unwrap_or(20).clamp(0, 1000),
-        // If the caller omits min_joint_motion we keep the default (Some(0.3)).
-        // Callers can pass `null` (→ None) to disable, or a concrete number.
         min_joint_motion: req.min_joint_motion.or(Some(0.3)),
-        // 1.0 s settle keeps free-fall drift out of the fitness score.
         settle_duration: Some(1.0),
-        num_signal_channels: req.num_signal_channels.unwrap_or(4),
+        num_signal_channels: req.num_signal_channels.unwrap_or(0),
         growth_interval: req.growth_interval,
         max_joint_angular_velocity: Some(12.0),
     };
@@ -182,48 +332,20 @@ async fn create_evolution(
     let evo_id = {
         let config_json = config_json.clone();
         let name = req.name.clone();
-        // Pre-creation we don't know the row id, so we can't store a specific
-        // seed yet. Pass None — get_evolution_seed will fall back to the id.
         db_read_async("api.create_evolution", state.db.clone(), move |c| {
             db::create_evolution(c, &config_json, name.as_deref(), None)
         })
         .await
     };
 
-    // Spawn coordinator for this evolution.
+    let engine = state.engine.clone();
     let db_c = state.db.clone();
     let tx = state.tx.clone();
     tokio::spawn(async move {
-        coordinator::run_evolution(db_c, evo_id, Some(tx)).await;
+        coordinator::run_evolution(engine, db_c, evo_id, Some(tx)).await;
     });
 
     Json(serde_json::json!({"id": evo_id, "status": "running"}))
-}
-
-async fn get_evolution(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
-    // The hot read: UI polls this for evolution status/generation. Expect
-    // sub-ms query, sub-ms acquire. Any spike here is the bug we're hunting.
-    let full = db_read_async("api.get_evolution", state.read_db.clone(), move |c| {
-        db::get_evolution_full(c, id)
-    })
-    .await;
-    match full {
-        Some((status, generation, config_json, name)) => {
-            let config = serde_json::from_str::<serde_json::Value>(&config_json)
-                .unwrap_or_default();
-            Json(serde_json::json!({
-                "id": id,
-                "status": status,
-                "generation": generation,
-                "config": config,
-                "name": name,
-            }))
-        }
-        None => Json(serde_json::json!({"error": "not found"})),
-    }
 }
 
 async fn patch_evolution(
@@ -231,7 +353,6 @@ async fn patch_evolution(
     Path(id): Path<i64>,
     Json(req): Json<PatchEvolutionRequest>,
 ) -> Json<serde_json::Value> {
-    // Trim whitespace; treat empty string as None (remove name)
     let name = req.name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let name_for_db = name.clone();
     db_read_async("api.patch_evolution", state.db.clone(), move |c| {
@@ -241,11 +362,6 @@ async fn patch_evolution(
     Json(serde_json::json!({"id": id, "name": name}))
 }
 
-/// PATCH /api/evolutions/{id}/config — update mutable config fields in-place.
-///
-/// Currently supports: `max_generations`. Merges the supplied fields into the
-/// stored config_json so the coordinator picks them up on its next iteration
-/// (it re-reads max_generations from the DB every generation).
 async fn patch_evolution_config_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -269,8 +385,8 @@ async fn delete_evolution_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
+    state.engine.remove_snapshot(id);
     db_read_async("api.delete_evolution", state.db.clone(), move |c| {
-        // Stop first so the coordinator task exits on its next status check.
         db::stop_evolution(c, id);
         db::delete_evolution(c, id);
     })
@@ -278,44 +394,11 @@ async fn delete_evolution_handler(
     axum::http::StatusCode::NO_CONTENT
 }
 
-async fn get_best(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Json<Vec<serde_json::Value>> {
-    let best = db_read_async("api.get_best", state.read_db.clone(), move |c| {
-        db::get_best_genotypes(c, id, 10)
-    })
-    .await;
-    Json(
-        best.into_iter()
-            .map(|(gid, fitness, _bytes, island_id)| {
-                serde_json::json!({"id": gid, "fitness": fitness, "island_id": island_id})
-            })
-            .collect(),
-    )
-}
-
-async fn get_best_per_island_handler(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Json<Vec<serde_json::Value>> {
-    let best = db_read_async("api.get_best_per_island", state.read_db.clone(), move |c| {
-        db::get_best_per_island(c, id)
-    })
-    .await;
-    Json(
-        best.into_iter()
-            .map(|(gid, fitness, island_id)| {
-                serde_json::json!({"id": gid, "fitness": fitness, "island_id": island_id})
-            })
-            .collect(),
-    )
-}
-
 async fn stop_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
+    state.engine.set_status(id, "stopped");
     db_read_async("api.stop_evolution", state.db.clone(), move |c| {
         db::stop_evolution(c, id)
     })
@@ -327,6 +410,7 @@ async fn pause_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
+    state.engine.set_status(id, "paused");
     db_read_async("api.pause_evolution", state.db.clone(), move |c| {
         db::pause_evolution(c, id)
     })
@@ -338,6 +422,7 @@ async fn resume_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
+    state.engine.set_status(id, "running");
     db_read_async("api.resume_evolution", state.db.clone(), move |c| {
         db::resume_evolution(c, id)
     })
@@ -345,21 +430,10 @@ async fn resume_evolution(
     Json(serde_json::json!({"status": "running"}))
 }
 
-/// Spawn a new evolution with the same config + seed as an existing one.
-///
-/// Deterministic re-run: the initial population and mutation stream will be
-/// byte-identical to the source evolution — every random draw feeds from
-/// `ChaCha8Rng::seed_from_u64(source_seed)`, same as the original run.
-/// Useful for reproducing bugs, testing the effect of a code change on
-/// otherwise-identical evolutionary pressure, or saving interesting seeds.
-///
-/// The new evolution gets a name prefixed with "Replay of {source}".
 async fn replay_evolution(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    // Read source config + name + seed, then insert new row in a single
-    // connection checkout. Seed is inherited verbatim.
     let result = db_read_async("api.replay_evolution", state.db.clone(), move |c| {
         let full = db::get_evolution_full(c, id)?;
         let (_status, _gen, config_json, src_name) = full;
@@ -377,11 +451,11 @@ async fn replay_evolution(
         None => return Json(serde_json::json!({"error": "source evolution not found"})),
     };
 
-    // Spawn coordinator for the replay.
+    let engine = state.engine.clone();
     let db_c = state.db.clone();
     let tx = state.tx.clone();
     tokio::spawn(async move {
-        coordinator::run_evolution(db_c, new_id, Some(tx)).await;
+        coordinator::run_evolution(engine, db_c, new_id, Some(tx)).await;
     });
 
     Json(serde_json::json!({
@@ -392,52 +466,7 @@ async fn replay_evolution(
     }))
 }
 
-async fn get_evolution_stats(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Json<Vec<serde_json::Value>> {
-    // UI chart data: can be expensive as generations accumulate — a GROUP BY
-    // over all genotypes in the evolution. Watch query-p99 here.
-    let stats = db_read_async("api.get_evolution_stats", state.read_db.clone(), move |c| {
-        db::get_generation_stats(c, id)
-    })
-    .await;
-    Json(
-        stats
-            .into_iter()
-            .map(|(generation, best, avg)| {
-                serde_json::json!({
-                    "generation": generation,
-                    "best_fitness": best,
-                    "avg_fitness": avg,
-                })
-            })
-            .collect(),
-    )
-}
-
-async fn get_island_stats_handler(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Json<Vec<serde_json::Value>> {
-    let stats = db_read_async("api.get_island_stats", state.read_db.clone(), move |c| {
-        db::get_island_stats(c, id)
-    })
-    .await;
-    Json(
-        stats
-            .into_iter()
-            .map(|(generation, island_id, best, avg)| {
-                serde_json::json!({
-                    "generation": generation,
-                    "island_id": island_id,
-                    "best_fitness": best,
-                    "avg_fitness": avg,
-                })
-            })
-            .collect(),
-    )
-}
+// ── Genotype endpoints (still use DB — these are user-triggered, rare) ──
 
 async fn get_genome_bytes(
     State(state): State<AppState>,
@@ -457,27 +486,17 @@ async fn get_genome_bytes(
     }
 }
 
-/// Develops a genome into its realized phenotype and returns body + joint info.
-/// This shows what the creature *actually becomes* after BFS expansion,
-/// respecting recursive_limit / terminal_only / connectivity pruning.
 async fn get_phenotype_info(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    // Everything — DB read, deserialization, `develop()`, JSON building —
-    // runs on a blocking-pool thread. Tokio runtime workers stay free to
-    // handle other HTTP traffic. The pool connection is released as soon as
-    // the BLOB read completes, before the CPU-heavy JSON tree is built.
     let db = state.read_db.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
-        // Only the BLOB read is DB work; the develop() + JSON build below is
-        // CPU-bound and shouldn't be attributed to query latency.
         let bytes = timed_db("api.get_phenotype_info", &db, |c| db::get_genotype(c, id));
         let bytes = bytes.ok_or(axum::http::StatusCode::NOT_FOUND)?;
         let genome = bincode::deserialize::<karl_sims_core::genotype::GenomeGraph>(&bytes)
             .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
         let pheno = karl_sims_core::phenotype::develop(&genome);
-        // Pair each body with its originating genome node.
         let bodies: Vec<_> = pheno
             .world
             .bodies
@@ -528,9 +547,6 @@ async fn get_genotype_info(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    // All DB + CPU work happens on the blocking pool. Connection is dropped
-    // immediately after fetching the BLOB, before the (often large) JSON
-    // tree over neurons/connections is built.
     let db = state.read_db.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, axum::http::StatusCode> {
         let bytes = timed_db("api.get_genotype_info", &db, |c| db::get_genotype(c, id));

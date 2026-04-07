@@ -1,74 +1,67 @@
-use std::time::Duration;
+use crossbeam_channel::Receiver;
 
 use karl_sims_core::fitness::{evaluate_fitness, EvolutionParams};
 use karl_sims_core::genotype::GenomeGraph;
 
-use crate::db::{claim_task, complete_task, DbPool};
-use crate::timing::timed_db;
+use crate::engine::{EvalResult, EvalTask};
 
-/// Run a worker on a dedicated OS thread (not tokio async — this is CPU-bound).
-pub fn spawn_worker(db: DbPool, worker_id: String) {
+/// Run a worker on a dedicated OS thread (not tokio — this is CPU-bound).
+///
+/// Workers receive tasks from a crossbeam channel (no DB access) and send
+/// results back via the per-generation result channel embedded in each task.
+/// This eliminates all DB contention on the hot path: no claim_task polls,
+/// no complete_task writes, no connection pool pressure.
+pub fn spawn_worker(task_rx: Receiver<EvalTask>, worker_id: String) {
     std::thread::spawn(move || {
-        run_worker_loop(db, worker_id);
+        run_worker_loop(task_rx, worker_id);
     });
 }
 
-fn run_worker_loop(db: DbPool, worker_id: String) {
+fn run_worker_loop(task_rx: Receiver<EvalTask>, worker_id: String) {
     loop {
-        // Each `db.get()` returns a PooledConnection that derefs to &Connection.
-        // No global lock — other workers, API handlers, and the coordinator
-        // each hold their own connection, and SQLite's WAL serializes the
-        // actual writes internally.
-        // `claim_task` is an `UPDATE ... RETURNING` — it takes the writer
-        // lock. Its query-latency p99 is our best direct signal of writer
-        // contention across the whole system.
-        let task = timed_db("worker.claim_task", &db, |c| claim_task(c, &worker_id));
+        // Block until a task is available.  crossbeam's MPMC semantics
+        // ensure each task is consumed by exactly one worker.  When the
+        // channel is empty, the thread sleeps (zero CPU) — no busy-polling.
+        let task = match task_rx.recv() {
+            Ok(t) => t,
+            Err(_) => {
+                // Channel closed — server is shutting down.
+                log::info!("Worker {worker_id}: task channel closed, exiting");
+                return;
+            }
+        };
 
-        match task {
-            Some((task_id, genome_bytes, config_json)) => {
-                match bincode::deserialize::<GenomeGraph>(&genome_bytes) {
-                    Ok(genome) => {
-                        let params: EvolutionParams =
-                            serde_json::from_str(&config_json).unwrap_or_default();
-                        // Fitness evaluation is the CPU-bound work — intentionally
-                        // run with NO connection held, so we don't starve the pool.
-                        // Catch panics so a single bad genome doesn't kill the
-                        // entire worker thread (and with it, the park).
-                        let result = std::panic::catch_unwind(
-                            std::panic::AssertUnwindSafe(|| evaluate_fitness(&genome, &params)),
-                        );
-                        let score = match result {
-                            Ok(r) => r.score,
-                            Err(e) => {
-                                let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                                    s.to_string()
-                                } else if let Some(s) = e.downcast_ref::<String>() {
-                                    s.clone()
-                                } else {
-                                    "unknown panic".to_string()
-                                };
-                                log::error!(
-                                    "Worker {worker_id}: panic during fitness eval for task {task_id}: {msg}"
-                                );
-                                0.0
-                            }
-                        };
-                        timed_db("worker.complete_task", &db, |c| {
-                            complete_task(c, task_id, score)
-                        });
-                    }
+        let fitness = match bincode::deserialize::<GenomeGraph>(&task.genome_bytes) {
+            Ok(genome) => {
+                let params: EvolutionParams =
+                    serde_json::from_str(&task.config_json).unwrap_or_default();
+                // Catch panics so a single bad genome doesn't kill the worker.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    evaluate_fitness(&genome, &params)
+                }));
+                match result {
+                    Ok(r) => r.score,
                     Err(e) => {
-                        log::error!("Worker {worker_id}: failed to deserialize genome for task {task_id}: {e}");
-                        timed_db("worker.complete_task", &db, |c| {
-                            complete_task(c, task_id, 0.0)
-                        });
+                        let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else if let Some(s) = e.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        log::error!("Worker {worker_id}: panic during fitness eval: {msg}");
+                        0.0
                     }
                 }
             }
-            None => {
-                // No work — sleep briefly before polling again
-                std::thread::sleep(Duration::from_millis(100));
+            Err(e) => {
+                log::error!("Worker {worker_id}: bincode deserialize failed: {e}");
+                0.0
             }
-        }
+        };
+
+        // Send result back to the coordinator.  If the receiver is dropped
+        // (coordinator gave up on this generation), silently discard.
+        task.result_tx.send(EvalResult { fitness }).ok();
     }
 }

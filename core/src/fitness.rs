@@ -140,7 +140,7 @@ pub struct EvolutionParams {
     /// Our variant: broadcast channels enable coordinated multi-segment gaits
     /// (e.g., centipede fin-beat synchronization). Set to 0 to disable
     /// (paper-faithful).
-    /// Default: 4.
+    /// Default: 0 (paper-faithful, disabled).
     #[serde(default = "default_num_signal_channels")]
     pub num_signal_channels: usize,
     /// Simulation frames between growth events during developmental growth.
@@ -165,7 +165,7 @@ fn default_migration_interval() -> usize { 20 }
 fn default_min_joint_motion() -> Option<f64> { Some(0.15) }
 fn default_max_joint_angular_velocity() -> Option<f64> { Some(12.0) }
 fn default_settle_duration() -> Option<f64> { Some(1.0) }
-fn default_num_signal_channels() -> usize { 4 }
+fn default_num_signal_channels() -> usize { 0 }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
@@ -187,7 +187,7 @@ impl Default for EvolutionParams {
             migration_interval: 20,
             min_joint_motion: Some(0.3),
             settle_duration: Some(1.0),
-            num_signal_channels: 4,
+            num_signal_channels: 0,
             growth_interval: None,
             max_joint_angular_velocity: Some(12.0),
         }
