@@ -48,7 +48,7 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
   const [evoConfig, setEvoConfig] = useState<EvolutionConfig | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Check for ?export=video URL param (used by Playwright/CLI capture)
+  // Check for ?export=video URL param (used by Playwright/CLI capture — kept for backwards compat)
   const autoExport = new URLSearchParams(window.location.search).get("export") === "video";
 
   useEffect(() => {
@@ -143,18 +143,13 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
                 goal={goal}
                 physicsJson={physicsConfigJson(evoConfig)}
                 exportVideo={autoExport}
+                creatureId={creatureId}
               />
             )}
           </div>
           <div className="flex items-center gap-3">
-            <a
-              href={`?export=video`}
-              className="px-3 py-1.5 text-sm rounded border border-border-subtle hover:bg-bg-surface transition-colors inline-block"
-            >
-              Export 10s Video (.mp4)
-            </a>
             <span className="text-xs text-text-muted">
-              Use <code>tools/capture-video.sh {evoId} {creatureId}</code> for CLI export
+              Use the <strong>Export .mp4</strong> button in the viewer to save a 10s video from your current camera angle
             </span>
           </div>
         </div>

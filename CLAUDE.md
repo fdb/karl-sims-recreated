@@ -84,9 +84,26 @@ Examples of existing paper divergences that should be configurable (most still T
 - `MIN_MUTATION_SCALE = 0.05` floor (`mutation.rs`) — paper uses pure `1/graph_size`
 - `max_joint_angular_velocity = 30.0` joint speed rejection (`fitness.rs`) — not in paper, prevents extreme contact-kick exploits while allowing random multi-body genomes to score nonzero
 
+## Sliding physics — the #1 recurring risk
+
+**Every parameter change must be validated against sliding.** Creatures that slide across the ground without meaningful joint-driven locomotion are the most persistent failure mode. This happens because Rapier has no static friction (stiction) — only dynamic Coulomb friction — so any micro-oscillation can convert to forward momentum.
+
+**Before handing off any change** that touches physics, fitness evaluation, guards, solver config, or actuator tuning:
+
+1. Start a short test evolution (30 gens, pop 100, 3 islands, Land)
+2. Watch the top creatures in the viewer — they should have visible limb motion
+3. If creatures slide without obvious locomotion, the change reintroduced the exploit
+4. Check both single-body creatures (planks that topple/roll) and multi-body creatures (should use gaits, not vibration)
+
+**The two failure modes to watch for:**
+- **Sliders**: multi-body creatures that vibrate/wiggle without meaningful locomotion but still score high fitness — guards too loose
+- **Planks**: single-body creatures dominate because multi-body creatures can't survive the guards — guards too strict
+
+The sweet spot is where multi-body creatures with visible gaits outcompete both sliders and planks.
+
 ## Key conventions
 
 - WASM uses `--target web`; `initWasm()` in `wasm.ts` explicitly calls the default `init()` export (do NOT make it a no-op)
-- `sim_init(genome_bytes, environment)` accepts "Water" or "Land" to match fitness evaluation physics
+- `sim_init(genome_bytes, environment, physics_json?)` accepts "Water" or "Land" plus optional JSON physics solver config to match server-side evaluation
 - Ground plane is at y=0 in physics; land creatures start at y=2.0
 - Fitness values can be pathological (NaN, Inf) from physics blowup — always guard and format

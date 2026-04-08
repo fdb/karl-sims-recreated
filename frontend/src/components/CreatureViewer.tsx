@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { initWasm, sim_init, sim_step_accurate, sim_body_count, sim_transforms, sim_light_position, sim_set_light_position } from "../wasm";
+import { exportToMp4, downloadBlob } from "../utils/videoExport";
 
 interface Props {
   genomeBytes: Uint8Array;
@@ -11,8 +12,8 @@ interface Props {
   physicsJson?: string;
   /** When set to true, triggers a video export of all 600 frames as WebM. */
   exportVideo?: boolean;
-  /** Called when the exported video blob is ready. */
-  onVideoExported?: (blob: Blob, filename: string) => void;
+  /** Creature ID, used for the exported filename. */
+  creatureId?: number;
 }
 
 const SIM_DURATION = 10.0; // seconds
@@ -20,7 +21,7 @@ const DT = 1.0 / 60.0;
 const TOTAL_FRAMES = Math.round(SIM_DURATION / DT); // 600
 const STRIDE = 10; // values per body: px py pz qw qx qy qz hx hy hz
 
-export default function CreatureViewer({ genomeBytes, environment = "Water", goal = "SwimmingSpeed", physicsJson, exportVideo = false, onVideoExported }: Props) {
+export default function CreatureViewer({ genomeBytes, environment = "Water", goal = "SwimmingSpeed", physicsJson, exportVideo = false, creatureId }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const animIdRef = useRef<number>(0);
@@ -32,6 +33,8 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
   const [isPlaying, setIsPlaying] = useState(true);
   const [hasNan, setHasNan] = useState(false);
   const [nanFrame, setNanFrame] = useState<number | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
 
   // Mutable refs for animation loop (avoids stale closures)
   const framesRef = useRef<Float64Array[]>([]);
@@ -40,6 +43,12 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
   const totalFramesRef = useRef(TOTAL_FRAMES);
   const meshesRef = useRef<THREE.Mesh[]>([]);
   const lightPositionsRef = useRef<[number, number, number][]>([]);
+
+  // Refs for export: camera, scene, renderer, controls — set inside the main useEffect
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const lightSphereRef = useRef<THREE.Mesh | null>(null);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -52,6 +61,51 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       applyTransforms(framesRef.current[frame], meshesRef.current);
     }
   }, []);
+
+  const handleExport = useCallback(async () => {
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const frames = framesRef.current;
+    const meshes = meshesRef.current;
+    const lightPositions = lightPositionsRef.current;
+    const lightSphere = lightSphereRef.current;
+    if (!renderer || !scene || !camera || frames.length === 0) return;
+
+    setIsExporting(true);
+    setExportProgress(0);
+    const wasPlaying = isPlayingRef.current;
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+
+    try {
+      const blob = await exportToMp4({
+        canvas: renderer.domElement,
+        totalFrames: frames.length,
+        fps: 60,
+        renderFrame: (i) => {
+          applyTransforms(frames[i], meshes);
+          if (lightSphere && lightPositions.length > 0) {
+            const lp = lightPositions[Math.min(i, lightPositions.length - 1)];
+            if (lp) lightSphere.position.set(lp[0], lp[1], lp[2]);
+          }
+          renderer.render(scene, camera);
+        },
+        onProgress: setExportProgress,
+      });
+
+      const filename = creatureId ? `creature-${creatureId}.mp4` : "creature.mp4";
+      downloadBlob(blob, filename);
+    } catch (e) {
+      console.error("Video export failed:", e);
+      alert(`Video export failed: ${e}`);
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
+      isPlayingRef.current = wasPlaying;
+      setIsPlaying(wasPlaying);
+    }
+  }, [creatureId]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -89,6 +143,11 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       controls.dampingFactor = 0.08;
       controls.minDistance = 0.3;
       controls.maxDistance = 50;
+
+      // Store refs for export handler
+      sceneRef.current = scene;
+      cameraRef.current = camera;
+      controlsRef.current = controls;
 
       // Lighting
       scene.add(new THREE.AmbientLight(0xffffff, 0.4));
@@ -131,6 +190,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
 
       // Light target indicator (only for LightFollowing)
       let lightSphere: THREE.Mesh | null = null;
+      lightSphereRef.current = null;
       if (goal === "LightFollowing") {
         // Set initial light position on the simulation
         sim_set_light_position(handle, 5.0, 0.0, 0.0);
@@ -146,6 +206,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
         );
         lightSphere.position.set(5, 0, 0);
         scene.add(lightSphere);
+        lightSphereRef.current = lightSphere;
 
         // Glow ring around the light
         const glowMat = new THREE.MeshBasicMaterial({
@@ -362,6 +423,10 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       framesRef.current = [];
       meshesRef.current = [];
       lightPositionsRef.current = [];
+      sceneRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+      lightSphereRef.current = null;
       delete (window as any).__creatureExport;
       document.body.removeAttribute("data-export-ready");
     };
@@ -415,6 +480,30 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
           <span style={{ color: "#aac", fontSize: 11, whiteSpace: "nowrap" }}>
             {Math.round(progress * 100)}%
           </span>
+        </div>
+      )}
+
+      {/* Export progress overlay */}
+      {isExporting && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+            zIndex: 20,
+          }}
+        >
+          <span style={{ color: "#ccc", fontSize: 13 }}>
+            Encoding MP4... {Math.round(exportProgress * 100)}%
+          </span>
+          <div style={{ width: "60%", height: 4, background: "#2a3d44", borderRadius: 2, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${exportProgress * 100}%`, background: "#4a9eca", borderRadius: 2, transition: "width 0.1s" }} />
+          </div>
         </div>
       )}
 
@@ -488,6 +577,26 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
             {(currentFrame / 60).toFixed(1)}s
             {hasNan && nanFrame !== null && currentFrame >= nanFrame && " ⚠"}
           </span>
+
+          {/* Export button */}
+          <button
+            onClick={handleExport}
+            disabled={isExporting}
+            style={{
+              background: "none",
+              border: "1px solid #556",
+              borderRadius: 4,
+              color: "#ccc",
+              cursor: isExporting ? "default" : "pointer",
+              padding: "2px 8px",
+              fontSize: 11,
+              whiteSpace: "nowrap",
+              opacity: isExporting ? 0.5 : 1,
+            }}
+            title="Export MP4 from current camera angle"
+          >
+            Export .mp4
+          </button>
         </div>
       )}
     </div>

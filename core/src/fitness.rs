@@ -627,8 +627,11 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     // We distinguish three "no DOFs to measure" cases:
     //
     //   1. feature disabled (None)                → 1.0   (paper-faithful)
-    //   2. single-body creature (num_bodies == 1) → 1.0   (truly cannot exploit
-    //                                                      joints; legitimate)
+    //   2. single-body creature (num_bodies == 1) → 0.0   (planks that topple/roll
+    //                                                      for distance; Sims 1994
+    //                                                      never had single-body
+    //                                                      creatures — genomes always
+    //                                                      specified connections)
     //   3. multi-body with ALL-Rigid joints       → 0.0   (rigid-welded assembly,
     //                                                      any motion comes from
     //                                                      the physics solver
@@ -639,10 +642,13 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     //
     // Previously cases 2 and 3 were conflated behind `dof_index.is_empty()`,
     // which let every rigid-welded assembly through with coefficient 1.0.
+    // Case 2 was then exempted, but that created the "plank dominance"
+    // problem: single-body creatures topple for ~0.84 m and outcompete
+    // multi-body creatures that are still learning to walk.
     let num_bodies = creature.world.bodies.len();
     let motion_coef = match (params.min_joint_motion, num_bodies == 1, dof_index.is_empty()) {
         (None, _, _) => 1.0,
-        (_, true, _) => 1.0,
+        (_, true, _) => 0.0,   // single-body planks get zero
         (Some(_), false, true) => 0.0,
         (Some(threshold), false, false) => {
             // If no window ever completed (sim shorter than WINDOW_SECONDS)
@@ -1321,6 +1327,8 @@ mod tests {
         // to score ~1.27 fitness purely from passive physics. With a 1-second
         // settle period, the post-settle position becomes the reference, so
         // the fall-and-tumble phase is excluded from score.
+        // Note: uses min_joint_motion=None so the single-body plank guard
+        // doesn't zero out the score — we're testing settle logic, not motion.
         let genome = GenomeGraph {
             nodes: vec![MorphNode {
                 // Asymmetric dimensions → tumbles on impact.
@@ -1337,7 +1345,7 @@ mod tests {
             global_brain: BrainGraph { neurons: Vec::new(), effectors: Vec::new(), signal_effectors: Vec::new() },
         };
 
-        let mut p = land_params_with_motion(Some(0.3));
+        let mut p = land_params_with_motion(None);
         p.sim_duration = 4.0;
         p.settle_duration = None;
         let r_no_settle = evaluate_fitness(&genome, &p);
@@ -1404,10 +1412,11 @@ mod tests {
     }
 
     #[test]
-    fn motion_coef_ignores_single_body_creature() {
-        // A creature with one body and no joints should get coefficient 1 —
-        // it has no brain→joint control path to exploit, so we shouldn't
-        // penalize it. Its score should match the None case.
+    fn motion_coef_zeroes_single_body_creature() {
+        // A single-body creature (plank) should get coefficient 0 when
+        // min_joint_motion is enabled. Sims 1994 never had single-body
+        // creatures; they dominate our evolution by toppling for ~0.84 m
+        // and outcompeting multi-body creatures that are still learning.
         let genome = GenomeGraph {
             nodes: vec![MorphNode {
                 dimensions: DVec3::new(0.3, 0.3, 0.3),
@@ -1426,7 +1435,10 @@ mod tests {
         let p_without = land_params_with_motion(None);
         let r_with = evaluate_fitness(&genome, &p_with);
         let r_without = evaluate_fitness(&genome, &p_without);
-        assert!((r_with.score - r_without.score).abs() < 1e-9);
+        // With min_joint_motion enabled, single-body gets zero.
+        assert!(r_with.score.abs() < 1e-9, "single-body should score 0 with motion guard, got {}", r_with.score);
+        // With min_joint_motion disabled (None), it can still score (paper-faithful).
+        assert!(r_without.score >= 0.0);
     }
 
     #[test]
