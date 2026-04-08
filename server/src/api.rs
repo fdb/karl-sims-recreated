@@ -311,7 +311,7 @@ async fn create_evolution(
         _ => Environment::Water,
     };
     let params = EvolutionParams {
-        population_size: req.population_size.unwrap_or(50).clamp(5, 1000),
+        population_size: req.population_size.unwrap_or(300).clamp(5, 1000),
         max_generations: req.generations.unwrap_or(100).clamp(1, 10000),
         goal,
         environment: env,
@@ -322,11 +322,11 @@ async fn create_evolution(
         max_body_angular_velocity: Some(20.0),
         num_islands: req.num_islands.unwrap_or(1).clamp(1, 12),
         migration_interval: req.migration_interval.unwrap_or(20).clamp(0, 1000),
-        min_joint_motion: req.min_joint_motion.or(Some(0.3)),
+        min_joint_motion: req.min_joint_motion.or(Some(0.1)),
         settle_duration: Some(1.0),
         num_signal_channels: req.num_signal_channels.unwrap_or(0),
         growth_interval: req.growth_interval,
-        max_joint_angular_velocity: Some(12.0),
+        max_joint_angular_velocity: Some(30.0),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {

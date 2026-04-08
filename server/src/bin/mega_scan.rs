@@ -23,7 +23,7 @@ fn main() {
         population_size: pop, max_generations: gens, goal: FitnessGoal::SwimmingSpeed,
         environment, sim_duration: 10.0, max_parts: 20,
         gravity: 9.81, water_viscosity: 2.0, max_body_angular_velocity: Some(20.0),
-        num_islands: 1, migration_interval: 20, min_joint_motion: Some(0.3),
+        num_islands: 1, migration_interval: 20, min_joint_motion: Some(0.1),
         settle_duration: Some(1.0), num_signal_channels: 0, growth_interval: None,
         max_joint_angular_velocity: Some(12.0),
     };

@@ -94,9 +94,11 @@ pub struct EvolutionParams {
     /// non-zero root drift from a DC effector bias, which evolution latches onto.
     /// Multiplying by joint-motion coefficient makes this strategy score zero.
     /// Set to `None` to disable (paper-faithful).
-    /// Default: 0.15 rad — a sine-wave gait of amplitude ≥ 0.21 rad comfortably passes
-    /// in every 2-second window (sine stddev = amplitude/√2 = 0.15), while a joint
-    /// pinned at a limit for the whole window fails.
+    /// Default: 0.1 rad — a sine-wave gait of amplitude ≥ 0.14 rad (8°)
+    /// passes in every 2-second window. Lower values let random multi-body
+    /// genomes score nonzero fitness, giving evolution material to work
+    /// with. Too-strict values (e.g. 0.3) kill most random multi-body
+    /// creatures, causing planks to dominate.
     #[serde(default = "default_min_joint_motion")]
     pub min_joint_motion: Option<f64>,
     /// Seconds of "settle" simulation before fitness measurement begins. On
@@ -126,8 +128,13 @@ pub struct EvolutionParams {
     /// that exploits ground friction for "sliding" locomotion (creature
     /// 1827790 / evo 21 pattern). Capping joint angular velocity forces
     /// evolution to use visible, biologically-plausible gaits.
-    /// Default: 12 rad/s (≈ 2 rev/s) — allows vigorous flapping and fast
-    /// gaits while rejecting supersonic-flipper exploits.
+    /// Default: 30 rad/s (≈ 5 rev/s) — generous enough that random
+    /// brains can produce nonzero fitness for multi-body creatures,
+    /// while still rejecting extreme contact-kick exploits (100+ rad/s).
+    /// At 60fps, 30 rad/s = ~29° per frame, which is visually fast but
+    /// not invisible. Too-tight caps (e.g., 12) kill most random
+    /// multi-body genomes, causing evolution to converge on single-body
+    /// planks that bypass all joint checks.
     /// Set to `None` to disable (paper-faithful).
     #[serde(default = "default_max_joint_angular_velocity")]
     pub max_joint_angular_velocity: Option<f64>,
@@ -162,8 +169,8 @@ fn default_viscosity() -> f64 { 2.0 }
 fn default_max_body_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_num_islands() -> usize { 1 }
 fn default_migration_interval() -> usize { 20 }
-fn default_min_joint_motion() -> Option<f64> { Some(0.15) }
-fn default_max_joint_angular_velocity() -> Option<f64> { Some(12.0) }
+fn default_min_joint_motion() -> Option<f64> { Some(0.1) }
+fn default_max_joint_angular_velocity() -> Option<f64> { Some(30.0) }
 fn default_settle_duration() -> Option<f64> { Some(1.0) }
 fn default_num_signal_channels() -> usize { 0 }
 
@@ -174,7 +181,7 @@ impl Default for EvolutionParams {
             // more genetic diversity. With parallel workers and early
             // termination of non-moving creatures, wall-time per generation
             // stays low (~1 s on 8-core). Sims 1994 used 300+.
-            population_size: 150,
+            population_size: 300,
             max_generations: 100,
             goal: FitnessGoal::SwimmingSpeed,
             environment: Environment::Water,
@@ -185,11 +192,11 @@ impl Default for EvolutionParams {
             max_body_angular_velocity: Some(20.0),
             num_islands: 1,
             migration_interval: 20,
-            min_joint_motion: Some(0.3),
+            min_joint_motion: Some(0.1),
             settle_duration: Some(1.0),
             num_signal_channels: 0,
             growth_interval: None,
-            max_joint_angular_velocity: Some(12.0),
+            max_joint_angular_velocity: Some(30.0),
         }
     }
 }
@@ -1373,7 +1380,7 @@ mod tests {
             settle_duration: Some(1.0),
             num_signal_channels: 4,
             growth_interval: Some(60),
-            max_joint_angular_velocity: Some(12.0),
+            max_joint_angular_velocity: Some(30.0),
         };
 
         for seed in 0..30u64 {

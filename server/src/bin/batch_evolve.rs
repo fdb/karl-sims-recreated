@@ -48,7 +48,7 @@ fn main() {
         max_body_angular_velocity: Some(20.0),
         num_islands: 1,
         migration_interval: 20,
-        min_joint_motion: Some(0.3),
+        min_joint_motion: Some(0.1),
         settle_duration: Some(1.0),
         num_signal_channels: 0,
         growth_interval: None,

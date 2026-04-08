@@ -82,7 +82,7 @@ Examples of existing paper divergences that should be configurable (most still T
 - Tournament selection with `k=3` (`coordinator.rs`) — paper uses various methods, we picked one
 - Random-injection interval of 10 generations (`coordinator.rs`) — not in paper
 - `MIN_MUTATION_SCALE = 0.05` floor (`mutation.rs`) — paper uses pure `1/graph_size`
-- `max_joint_angular_velocity = 12.0` joint speed rejection (`fitness.rs`) — not in paper, prevents invisible-flipper friction ratchet exploit
+- `max_joint_angular_velocity = 30.0` joint speed rejection (`fitness.rs`) — not in paper, prevents extreme contact-kick exploits while allowing random multi-body genomes to score nonzero
 
 ## Key conventions
 
