@@ -12,7 +12,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [popSize, setPopSize] = useState(300);
   const [maxGen, setMaxGen] = useState(300);
   const [simDuration, setSimDuration] = useState(10);
-  const [maxParts, setMaxParts] = useState(20);
+  const [maxParts, setMaxParts] = useState(5);
   const [gravity, setGravity] = useState(9.81);
   const [viscosity, setViscosity] = useState(2.0);
   const [numIslands, setNumIslands] = useState(5);
@@ -20,6 +20,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [islandStrategy, setIslandStrategy] = useState("isolated");
   const [exchangeInterval, setExchangeInterval] = useState(10);
   const [diversityPressure, setDiversityPressure] = useState(0.0);
+  const [airtimePenalty, setAirtimePenalty] = useState(0.0);
   const [minJointMotion, setMinJointMotion] = useState(0.2);
   const [maxJointAngularVelocity, setMaxJointAngularVelocity] = useState(20);
   const [solverIterations, setSolverIterations] = useState(8);
@@ -52,6 +53,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       friction_coefficient: frictionCoefficient,
       use_coulomb_friction: useCoulombFriction,
       friction_combine_max: frictionCombineMax,
+      airtime_penalty: airtimePenalty > 0 ? airtimePenalty : undefined,
       island_strategy: islandStrategy,
       exchange_interval: islandStrategy === "hfc" ? exchangeInterval : undefined,
       migration_interval: islandStrategy === "ring_migration" ? migrationInterval : 0,
@@ -310,6 +312,25 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             Morphological niching: penalizes creatures similar to others. 0 = off.
           </p>
         </div>
+
+        {/* Airtime penalty (land only) */}
+        {environment === "land" && (
+          <div>
+            <label className={labelClass}>Airtime Penalty: {airtimePenalty.toFixed(2)}</label>
+            <input
+              type="range"
+              value={airtimePenalty}
+              onChange={(e) => setAirtimePenalty(Number(e.target.value))}
+              min={0}
+              max={1}
+              step={0.05}
+              className="w-full accent-accent"
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Penalizes hopping/jumping. Pushes toward ground-contact gaits (walking, crawling). 0 = off.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Advanced settings toggle */}

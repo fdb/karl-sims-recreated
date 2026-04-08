@@ -253,6 +253,19 @@ pub struct EvolutionParams {
     /// Default: 10 generations.
     #[serde(default = "default_exchange_interval")]
     pub exchange_interval: usize,
+    /// Airtime penalty: reduces fitness proportional to time spent airborne.
+    /// Penalizes hopping/jumping gaits that launch the creature ballistically.
+    /// The root body's Y position is tracked each frame; frames where it
+    /// exceeds the settled height + a margin count as "airborne."
+    /// `score *= (1 - airtime_penalty * airtime_fraction)`
+    ///
+    /// Sims 1994: no airtime penalty — creatures in water are neutrally
+    /// buoyant, so hopping isn't an issue.
+    /// Our variant: Land creatures can exploit ballistic hops for distance.
+    /// This penalty pushes evolution toward ground-contact gaits (walking,
+    /// crawling, slithering). Default: 0.0 (disabled).
+    #[serde(default = "default_airtime_penalty")]
+    pub airtime_penalty: f64,
     /// Morphological niching pressure (0.0 = off, 1.0 = full sharing).
     /// After fitness evaluation, creatures with similar morphologies have their
     /// effective fitness reduced, pushing evolution toward diverse body plans.
@@ -280,6 +293,7 @@ fn default_pgs_iterations() -> Option<usize> { Some(2) }
 fn default_friction_coefficient() -> Option<f64> { Some(1.5) }
 fn default_use_coulomb_friction() -> Option<bool> { Some(true) }
 fn default_friction_combine_max() -> Option<bool> { Some(true) }
+fn default_airtime_penalty() -> f64 { 0.0 }
 fn default_island_strategy() -> IslandStrategy { IslandStrategy::Isolated }
 fn default_exchange_interval() -> usize { 10 }
 fn default_diversity_pressure() -> f64 { 0.0 }
@@ -296,7 +310,7 @@ impl Default for EvolutionParams {
             goal: FitnessGoal::SwimmingSpeed,
             environment: Environment::Water,
             sim_duration: 10.0,
-            max_parts: 20,
+            max_parts: 5,
             gravity: 9.81,
             water_viscosity: 2.0,
             max_body_angular_velocity: Some(20.0),
@@ -312,6 +326,7 @@ impl Default for EvolutionParams {
             friction_coefficient: Some(1.5),
             use_coulomb_friction: Some(true),
             friction_combine_max: Some(true),
+            airtime_penalty: 0.0,
             island_strategy: IslandStrategy::Isolated,
             exchange_interval: 10,
             diversity_pressure: 0.0,
@@ -425,6 +440,12 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     let mut initial_pos = spawn_pos;
     let mut max_displacement: f64 = 0.0;
     let mut prev_pos = initial_pos;
+    // Airtime tracking: count post-settle frames where root Y exceeds
+    // settled height + margin.
+    let mut airborne_frames: usize = 0;
+    let mut eval_frames: usize = 0;
+    let mut settled_y: f64 = spawn_pos.y; // overwritten after settle
+    const AIRBORNE_MARGIN: f64 = 0.15; // m above settled Y to count as airborne
     // Dynamic settle tracking.
     let mut stable_count: usize = 0;
     let mut actual_settle_steps: usize = 0;
@@ -511,6 +532,7 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
             if settled || capped {
                 actual_settle_steps = step + 1;
                 initial_pos = pos;
+                settled_y = pos.y;
                 max_displacement = 0.0;
                 early_check_step = actual_settle_steps + (2.0 / dt).round() as usize;
                 // Reset brain time so oscillators start their cycles at t=0
@@ -646,6 +668,14 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
             frames_in_window = 0;
         }
 
+        // Airtime tracking: count frames where root is above settled height.
+        if settle_enabled && actual_settle_steps > 0 || !settle_enabled {
+            eval_frames += 1;
+            if pos.y > settled_y + AIRBORNE_MARGIN {
+                airborne_frames += 1;
+            }
+        }
+
         max_displacement = max_displacement.max(disp);
         // Early-termination: if a creature has not reached 5 cm of peak
         // displacement from origin in the first 2 s, kill it. We test
@@ -719,8 +749,17 @@ fn evaluate_speed_fitness(creature: &mut Creature, params: &EvolutionParams) -> 
     };
 
     let base_score = horizontal_distance * 0.7 + max_displacement * 0.3;
+
+    // Airtime penalty: reduce score proportional to time spent airborne.
+    let airtime_coef = if params.airtime_penalty > 0.0 && eval_frames > 0 {
+        let airtime_frac = airborne_frames as f64 / eval_frames as f64;
+        1.0 - params.airtime_penalty * airtime_frac
+    } else {
+        1.0
+    };
+
     FitnessResult {
-        score: base_score * motion_coef,
+        score: base_score * motion_coef * airtime_coef,
         distance: horizontal_distance,
         max_displacement,
         terminated_early: false,
@@ -1298,6 +1337,7 @@ mod tests {
             friction_coefficient: None,
             use_coulomb_friction: None,
             friction_combine_max: None,
+            airtime_penalty: 0.0,
             island_strategy: IslandStrategy::Isolated,
             exchange_interval: 10,
             diversity_pressure: 0.0,
@@ -1547,6 +1587,7 @@ mod tests {
             friction_coefficient: None,
             use_coulomb_friction: None,
             friction_combine_max: None,
+            airtime_penalty: 0.0,
             island_strategy: IslandStrategy::Isolated,
             exchange_interval: 10,
             diversity_pressure: 0.0,

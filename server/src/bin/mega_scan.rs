@@ -31,6 +31,7 @@ fn main() {
         friction_coefficient: Some(1.5),
         use_coulomb_friction: Some(true),
         friction_combine_max: Some(true),
+        airtime_penalty: 0.0,
         island_strategy: karl_sims_core::fitness::IslandStrategy::Isolated,
         exchange_interval: 10,
         diversity_pressure: 0.0,

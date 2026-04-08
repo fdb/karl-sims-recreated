@@ -14,6 +14,7 @@ export interface EvolutionConfig {
   friction_coefficient?: number;
   use_coulomb_friction?: boolean;
   friction_combine_max?: boolean;
+  airtime_penalty?: number;
   island_strategy?: "Isolated" | "RingMigration" | "HFC";
   exchange_interval?: number;
   diversity_pressure?: number;
@@ -82,6 +83,7 @@ export interface CreateEvolutionParams {
   friction_coefficient?: number;
   use_coulomb_friction?: boolean;
   friction_combine_max?: boolean;
+  airtime_penalty?: number;
   island_strategy?: string;
   exchange_interval?: number;
   diversity_pressure?: number;
