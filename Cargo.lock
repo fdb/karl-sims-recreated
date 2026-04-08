@@ -921,6 +921,8 @@ dependencies = [
  "js-sys",
  "karl-sims-core",
  "log",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
 ]
 

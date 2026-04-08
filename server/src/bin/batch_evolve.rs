@@ -53,6 +53,11 @@ fn main() {
         num_signal_channels: 0,
         growth_interval: None,
         max_joint_angular_velocity: Some(12.0),
+        solver_iterations: Some(8),
+        pgs_iterations: Some(2),
+        friction_coefficient: Some(1.5),
+        use_coulomb_friction: Some(true),
+        friction_combine_max: Some(true),
     };
 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);

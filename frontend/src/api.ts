@@ -9,6 +9,30 @@ export interface EvolutionConfig {
   max_parts: number;
   num_islands?: number;
   migration_interval?: number;
+  solver_iterations?: number;
+  pgs_iterations?: number;
+  friction_coefficient?: number;
+  use_coulomb_friction?: boolean;
+  friction_combine_max?: boolean;
+}
+
+/** Extract physics solver config from EvolutionConfig for passing to WASM sim_init. */
+export function physicsConfigJson(config?: EvolutionConfig): string | undefined {
+  if (!config) return undefined;
+  const {
+    solver_iterations, pgs_iterations, friction_coefficient,
+    use_coulomb_friction, friction_combine_max,
+  } = config;
+  // Only produce JSON if at least one field is set
+  if (solver_iterations == null && pgs_iterations == null &&
+      friction_coefficient == null && use_coulomb_friction == null &&
+      friction_combine_max == null) {
+    return undefined;
+  }
+  return JSON.stringify({
+    solver_iterations, pgs_iterations, friction_coefficient,
+    use_coulomb_friction, friction_combine_max,
+  });
 }
 
 export interface Evolution {
@@ -50,6 +74,11 @@ export interface CreateEvolutionParams {
   migration_interval?: number;
   min_joint_motion?: number;
   max_joint_angular_velocity?: number;
+  solver_iterations?: number;
+  pgs_iterations?: number;
+  friction_coefficient?: number;
+  use_coulomb_friction?: boolean;
+  friction_combine_max?: boolean;
   name?: string;
 }
 

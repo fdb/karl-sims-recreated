@@ -19,9 +19,15 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [migrationInterval, setMigrationInterval] = useState(20);
   const [minJointMotion, setMinJointMotion] = useState(0.2);
   const [maxJointAngularVelocity, setMaxJointAngularVelocity] = useState(20);
+  const [solverIterations, setSolverIterations] = useState(8);
+  const [pgsIterations, setPgsIterations] = useState(2);
+  const [frictionCoefficient, setFrictionCoefficient] = useState(1.5);
+  const [useCoulombFriction, setUseCoulombFriction] = useState(true);
+  const [frictionCombineMax, setFrictionCombineMax] = useState(true);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showSolver, setShowSolver] = useState(false);
 
   const handleSubmit = async () => {
     setCreating(true);
@@ -38,6 +44,11 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       migration_interval: migrationInterval,
       min_joint_motion: minJointMotion,
       max_joint_angular_velocity: maxJointAngularVelocity,
+      solver_iterations: solverIterations,
+      pgs_iterations: pgsIterations,
+      friction_coefficient: frictionCoefficient,
+      use_coulomb_friction: useCoulombFriction,
+      friction_combine_max: frictionCombineMax,
       name: name.trim() || undefined,
     });
     setCreating(false);
@@ -282,6 +293,93 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
               Rejects creatures with joints faster than this. Lower = stricter
               (blocks sliding exploits). Too low kills multi-body diversity.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Physics solver toggle */}
+      <button
+        onClick={() => setShowSolver(!showSolver)}
+        className="block mt-1 text-xs text-text-muted hover:text-text-secondary transition-colors"
+      >
+        {showSolver ? "\u25BC" : "\u25B6"} Physics solver
+      </button>
+
+      {showSolver && (
+        <div className="grid grid-cols-2 gap-x-8 gap-y-4 mt-3 pt-3 border-t border-border">
+          {/* Solver Iterations */}
+          <div>
+            <label className={labelClass}>Solver Iterations</label>
+            <input
+              type="number"
+              value={solverIterations}
+              onChange={(e) => setSolverIterations(Number(e.target.value))}
+              min={1}
+              max={64}
+              step={1}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Rapier default: 4. Higher = better friction convergence, less sliding. 8-16 recommended.
+            </p>
+          </div>
+
+          {/* PGS Iterations */}
+          <div>
+            <label className={labelClass}>PGS Iterations</label>
+            <input
+              type="number"
+              value={pgsIterations}
+              onChange={(e) => setPgsIterations(Number(e.target.value))}
+              min={1}
+              max={16}
+              step={1}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Internal passes per solver iteration. Total work = solver {"\u00D7"} PGS.
+            </p>
+          </div>
+
+          {/* Friction Coefficient */}
+          <div>
+            <label className={labelClass}>Friction Coefficient</label>
+            <input
+              type="number"
+              value={frictionCoefficient}
+              onChange={(e) => setFrictionCoefficient(Number(e.target.value))}
+              min={0}
+              max={10}
+              step={0.1}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Rapier default: 0.8. Values {">"}1.0 compensate for missing static friction.
+            </p>
+          </div>
+
+          {/* Checkboxes row */}
+          <div className="flex flex-col gap-3 justify-center">
+            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useCoulombFriction}
+                onChange={(e) => setUseCoulombFriction(e.target.checked)}
+                className="accent-accent"
+              />
+              Coulomb friction model
+              <span className="text-text-muted">(per-contact-point, more accurate)</span>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={frictionCombineMax}
+                onChange={(e) => setFrictionCombineMax(e.target.checked)}
+                className="accent-accent"
+              />
+              Max friction combine rule
+              <span className="text-text-muted">(higher friction always wins)</span>
+            </label>
           </div>
         </div>
       )}

@@ -40,6 +40,11 @@ struct CreateEvolutionRequest {
     max_joint_angular_velocity: Option<f64>,
     num_signal_channels: Option<usize>,
     growth_interval: Option<usize>,
+    solver_iterations: Option<usize>,
+    pgs_iterations: Option<usize>,
+    friction_coefficient: Option<f64>,
+    use_coulomb_friction: Option<bool>,
+    friction_combine_max: Option<bool>,
     name: Option<String>,
 }
 
@@ -328,6 +333,11 @@ async fn create_evolution(
         num_signal_channels: req.num_signal_channels.unwrap_or(0),
         growth_interval: req.growth_interval,
         max_joint_angular_velocity: req.max_joint_angular_velocity.or(Some(20.0)),
+        solver_iterations: req.solver_iterations.map(|v| v.clamp(1, 64)).or(Some(8)),
+        pgs_iterations: req.pgs_iterations.map(|v| v.clamp(1, 16)).or(Some(2)),
+        friction_coefficient: req.friction_coefficient.map(|v| v.clamp(0.0, 10.0)).or(Some(1.5)),
+        use_coulomb_friction: req.use_coulomb_friction.or(Some(true)),
+        friction_combine_max: req.friction_combine_max.or(Some(true)),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {

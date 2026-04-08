@@ -26,6 +26,11 @@ fn main() {
         num_islands: 1, migration_interval: 20, min_joint_motion: Some(0.1),
         settle_duration: Some(1.0), num_signal_channels: 0, growth_interval: None,
         max_joint_angular_velocity: Some(12.0),
+        solver_iterations: Some(8),
+        pgs_iterations: Some(2),
+        friction_coefficient: Some(1.5),
+        use_coulomb_friction: Some(true),
+        friction_combine_max: Some(true),
     };
 
     let mut flag_counts: BTreeMap<String, usize> = BTreeMap::new();

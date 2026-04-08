@@ -22,6 +22,16 @@ pub struct World {
     pub water_viscosity: f64,
     pub ground_enabled: bool,
     pub light_position: DVec3,
+    /// Number of solver iterations per Rapier step (default: 4).
+    pub solver_iterations: usize,
+    /// Number of internal PGS iterations per solver iteration (default: 1).
+    pub pgs_iterations: usize,
+    /// Friction coefficient for creature bodies and ground (default: 0.8).
+    pub friction_coefficient: f64,
+    /// Use per-contact-point Coulomb friction instead of grouped Simplified (default: false).
+    pub use_coulomb_friction: bool,
+    /// Use CoefficientCombineRule::Max instead of Average (default: false).
+    pub friction_combine_max: bool,
     rapier_state: Option<RapierState>,
 }
 
@@ -51,6 +61,11 @@ impl Clone for World {
             water_viscosity: self.water_viscosity,
             ground_enabled: self.ground_enabled,
             light_position: self.light_position,
+            solver_iterations: self.solver_iterations,
+            pgs_iterations: self.pgs_iterations,
+            friction_coefficient: self.friction_coefficient,
+            use_coulomb_friction: self.use_coulomb_friction,
+            friction_combine_max: self.friction_combine_max,
             // Rapier state cannot be cloned — it will be lazily rebuilt on
             // the first `step()` call of the cloned World.
             rapier_state: None,
@@ -85,6 +100,11 @@ impl World {
             // pointing off-axis, which evolution could exploit to maintain
             // a consistent heading without any real "navigation" ability.
             light_position: DVec3::ZERO,
+            solver_iterations: 4,
+            pgs_iterations: 1,
+            friction_coefficient: 0.8,
+            use_coulomb_friction: false,
+            friction_combine_max: false,
             rapier_state: None,
         }
     }
@@ -116,6 +136,8 @@ impl World {
                 &self.bodies[idx],
                 &self.transforms[idx],
                 self.water_enabled,
+                self.friction_coefficient,
+                self.friction_combine_max,
             );
         }
         idx
@@ -182,6 +204,11 @@ impl World {
                 self.gravity,
                 self.ground_enabled,
                 self.water_enabled,
+                self.solver_iterations,
+                self.pgs_iterations,
+                self.friction_coefficient,
+                self.use_coulomb_friction,
+                self.friction_combine_max,
             ));
         }
         let rapier = self.rapier_state.as_mut().unwrap();

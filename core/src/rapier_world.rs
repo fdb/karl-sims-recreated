@@ -68,6 +68,11 @@ impl RapierState {
         gravity: DVec3,
         ground_enabled: bool,
         water_enabled: bool,
+        solver_iterations: usize,
+        pgs_iterations: usize,
+        friction_coefficient: f64,
+        use_coulomb_friction: bool,
+        friction_combine_max: bool,
     ) -> Self {
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
@@ -100,26 +105,30 @@ impl RapierState {
             let handle = bodies.insert(rb);
             body_handles.push(handle);
 
-            let collider = ColliderBuilder::cuboid(he.x, he.y, he.z)
+            let mut coll_builder = ColliderBuilder::cuboid(he.x, he.y, he.z)
                 .density(body.mass / (he.x * he.y * he.z * 8.0))
                 .restitution(0.1)
-                .friction(0.8)
-                .collision_groups(creature_groups)
-                .build();
-            colliders.insert_with_parent(collider, handle, &mut bodies);
+                .friction(friction_coefficient)
+                .collision_groups(creature_groups);
+            if friction_combine_max {
+                coll_builder = coll_builder.friction_combine_rule(CoefficientCombineRule::Max);
+            }
+            colliders.insert_with_parent(coll_builder.build(), handle, &mut bodies);
         }
 
         // ── Ground plane ──────────────────────────────────────────────────────
         // Use a large flat box with its top surface at y=0 rather than a halfspace,
         // since halfspace requires a Unit<Vector> which is harder to construct.
         if ground_enabled {
-            let ground = ColliderBuilder::cuboid(1000.0, 0.1, 1000.0)
+            let mut ground_builder = ColliderBuilder::cuboid(1000.0, 0.1, 1000.0)
                 .translation(DVec3::new(0.0, -0.1, 0.0))
-                .friction(0.8)
+                .friction(friction_coefficient)
                 .restitution(0.1)
-                .collision_groups(ground_groups)
-                .build();
-            colliders.insert(ground);
+                .collision_groups(ground_groups);
+            if friction_combine_max {
+                ground_builder = ground_builder.friction_combine_rule(CoefficientCombineRule::Max);
+            }
+            colliders.insert(ground_builder.build());
         }
 
         // ── Joints ────────────────────────────────────────────────────────────
@@ -177,6 +186,11 @@ impl RapierState {
         // ── Integration parameters ────────────────────────────────────────────
         let mut integration_params = IntegrationParameters::default();
         integration_params.dt = 1.0 / 60.0; // will be overridden at step time
+        integration_params.num_solver_iterations = solver_iterations;
+        integration_params.num_internal_pgs_iterations = pgs_iterations;
+        if use_coulomb_friction {
+            integration_params.friction_model = FrictionModel::Coulomb;
+        }
 
         let _ = (root_idx, gravity, water_enabled); // used via body setup above
 
@@ -206,6 +220,8 @@ impl RapierState {
         body: &RigidBody,
         transform: &DAffine3,
         water_enabled: bool,
+        friction_coefficient: f64,
+        friction_combine_max: bool,
     ) -> usize {
         let creature_groups = InteractionGroups::new(
             Group::GROUP_1, Group::GROUP_2, InteractionTestMode::And,
@@ -221,13 +237,15 @@ impl RapierState {
             .build();
         let handle = self.bodies.insert(rb);
 
-        let collider = ColliderBuilder::cuboid(he.x, he.y, he.z)
+        let mut coll_builder = ColliderBuilder::cuboid(he.x, he.y, he.z)
             .density(body.mass / (he.x * he.y * he.z * 8.0))
             .restitution(0.1)
-            .friction(0.8)
-            .collision_groups(creature_groups)
-            .build();
-        self.colliders.insert_with_parent(collider, handle, &mut self.bodies);
+            .friction(friction_coefficient)
+            .collision_groups(creature_groups);
+        if friction_combine_max {
+            coll_builder = coll_builder.friction_combine_rule(CoefficientCombineRule::Max);
+        }
+        self.colliders.insert_with_parent(coll_builder.build(), handle, &mut self.bodies);
 
         let idx = self.body_handles.len();
         self.body_handles.push(handle);
@@ -629,6 +647,7 @@ mod tests {
         let mut state = RapierState::build(
             &bodies, &joints, &transforms, 0, gravity,
             false, false,
+            4, 1, 0.8, false, false,
         );
 
         let mut joints_mut = joints.clone();
@@ -656,6 +675,7 @@ mod tests {
         let mut state = RapierState::build(
             &bodies, &joints, &transforms, 0, gravity,
             true, false,
+            4, 1, 0.8, false, false,
         );
 
         let mut joints_mut = joints.clone();

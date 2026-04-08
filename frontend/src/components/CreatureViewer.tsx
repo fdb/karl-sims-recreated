@@ -7,6 +7,8 @@ interface Props {
   genomeBytes: Uint8Array;
   environment?: "Water" | "Land";
   goal?: "SwimmingSpeed" | "LightFollowing";
+  /** JSON string with physics solver config, passed to WASM sim_init. */
+  physicsJson?: string;
   /** When set to true, triggers a video export of all 600 frames as WebM. */
   exportVideo?: boolean;
   /** Called when the exported video blob is ready. */
@@ -18,7 +20,7 @@ const DT = 1.0 / 60.0;
 const TOTAL_FRAMES = Math.round(SIM_DURATION / DT); // 600
 const STRIDE = 10; // values per body: px py pz qw qx qy qz hx hy hz
 
-export default function CreatureViewer({ genomeBytes, environment = "Water", goal = "SwimmingSpeed", exportVideo = false, onVideoExported }: Props) {
+export default function CreatureViewer({ genomeBytes, environment = "Water", goal = "SwimmingSpeed", physicsJson, exportVideo = false, onVideoExported }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const animIdRef = useRef<number>(0);
@@ -108,7 +110,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       // --- WASM simulation handle ---
       let handle;
       try {
-        handle = sim_init(genomeBytes, environment);
+        handle = sim_init(genomeBytes, environment, physicsJson);
       } catch (e) {
         console.error("CreatureViewer: sim_init failed:", e);
         return;
@@ -363,7 +365,7 @@ export default function CreatureViewer({ genomeBytes, environment = "Water", goa
       delete (window as any).__creatureExport;
       document.body.removeAttribute("data-export-ready");
     };
-  }, [genomeBytes, environment, goal]);
+  }, [genomeBytes, environment, goal, physicsJson]);
 
   // --- Pause playback when export mode is active (capture is driven externally) ---
   useEffect(() => {

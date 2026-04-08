@@ -17,11 +17,21 @@ pub struct SimHandle {
 
 /// Initialize a simulation from serialized genome bytes.
 /// `environment` should be "Water" or "Land".
+/// `physics_json` is an optional JSON string with physics solver config:
+///   `{"solver_iterations":8,"pgs_iterations":2,"friction_coefficient":1.5,
+///     "use_coulomb_friction":true,"friction_combine_max":true}`
+/// Omitted or null fields use World defaults.
 #[wasm_bindgen]
-pub fn sim_init(genome_bytes: &[u8], environment: &str) -> Result<SimHandle, JsValue> {
+pub fn sim_init(genome_bytes: &[u8], environment: &str, physics_json: Option<String>) -> Result<SimHandle, JsValue> {
     let genome: GenomeGraph = bincode::deserialize(genome_bytes)
         .map_err(|e| JsValue::from_str(&format!("Failed to deserialize genome: {e}")))?;
     let mut creature = Creature::from_genome(genome);
+
+    // Apply physics solver config if provided.
+    if let Some(json) = physics_json {
+        apply_physics_json(&mut creature.world, &json)?;
+    }
+
     match environment {
         "Land" => {
             creature.world.water_enabled = false;
@@ -39,6 +49,26 @@ pub fn sim_init(genome_bytes: &[u8], environment: &str) -> Result<SimHandle, JsV
         }
     }
     Ok(SimHandle { creature })
+}
+
+/// Parse a JSON physics config and apply to a World.
+fn apply_physics_json(world: &mut karl_sims_core::world::World, json: &str) -> Result<(), JsValue> {
+    #[derive(serde::Deserialize)]
+    struct PhysicsConfig {
+        solver_iterations: Option<usize>,
+        pgs_iterations: Option<usize>,
+        friction_coefficient: Option<f64>,
+        use_coulomb_friction: Option<bool>,
+        friction_combine_max: Option<bool>,
+    }
+    let cfg: PhysicsConfig = serde_json::from_str(json)
+        .map_err(|e| JsValue::from_str(&format!("Bad physics_json: {e}")))?;
+    if let Some(v) = cfg.solver_iterations { world.solver_iterations = v; }
+    if let Some(v) = cfg.pgs_iterations { world.pgs_iterations = v; }
+    if let Some(v) = cfg.friction_coefficient { world.friction_coefficient = v; }
+    if let Some(v) = cfg.use_coulomb_friction { world.use_coulomb_friction = v; }
+    if let Some(v) = cfg.friction_combine_max { world.friction_combine_max = v; }
+    Ok(())
 }
 
 /// Advance the simulation by one frame (1/60 s).

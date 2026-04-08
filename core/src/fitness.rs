@@ -162,6 +162,62 @@ pub struct EvolutionParams {
     /// Default: `None` (paper-faithful, instant development).
     #[serde(default)]
     pub growth_interval: Option<usize>,
+    /// Number of PGS solver iterations per Rapier sub-step.
+    ///
+    /// Sims 1994: custom solver with unspecified iteration count.
+    /// Our variant: Rapier's default is 4, which under-solves friction
+    /// constraints and allows creatures to slide across surfaces. Higher
+    /// values (8–16) converge friction properly, making ground contact
+    /// behave more like the stiff solvers of the 1990s. Performance cost
+    /// is roughly linear in iteration count.
+    /// Set to `None` to use Rapier default (4).
+    #[serde(default = "default_solver_iterations")]
+    pub solver_iterations: Option<usize>,
+    /// Number of internal PGS (Projected Gauss-Seidel) iterations per
+    /// solver iteration. Multiplies with `solver_iterations` for total work.
+    ///
+    /// Sims 1994: n/a (different solver architecture).
+    /// Our variant: default 1 is Rapier's baseline. Raising to 2 improves
+    /// friction and joint constraint convergence at ~2× cost per solver
+    /// iteration.
+    /// Set to `None` to use Rapier default (1).
+    #[serde(default = "default_pgs_iterations")]
+    pub pgs_iterations: Option<usize>,
+    /// Coulomb friction coefficient for creature bodies and the ground plane.
+    ///
+    /// Sims 1994: unspecified friction model (likely ODE-style with static
+    /// friction and friction-pyramid approximation that overestimates grip).
+    /// Our variant: Rapier uses dynamic-only Coulomb friction (no stiction),
+    /// so surfaces are inherently slipperier than 1990s engines. Values > 1.0
+    /// partially compensate for this. The effective friction between two
+    /// surfaces is combined via `friction_combine_rule`.
+    /// Default: 1.5 (increased from Rapier's typical 0.8 to compensate for
+    /// missing static friction). Set to `None` to use 0.8 (Rapier default).
+    #[serde(default = "default_friction_coefficient")]
+    pub friction_coefficient: Option<f64>,
+    /// Use per-contact-point Coulomb friction model instead of Rapier's
+    /// default Simplified model (which groups 4 contacts into 1 constraint).
+    ///
+    /// Sims 1994: n/a.
+    /// Our variant: `Coulomb` mode resolves friction per contact point,
+    /// giving more accurate ground grip for creatures with multiple body
+    /// parts resting on the surface. Slightly more expensive.
+    /// Default: true. Set to `None` or `false` to use Simplified
+    /// (Rapier default).
+    #[serde(default = "default_use_coulomb_friction")]
+    pub use_coulomb_friction: Option<bool>,
+    /// Use CoefficientCombineRule::Max instead of Average for friction
+    /// coefficient combination between two colliders.
+    ///
+    /// Sims 1994: n/a.
+    /// Our variant: with Max rule, the higher friction always wins at
+    /// contact — ground with friction 1.5 touching a body with friction 1.5
+    /// yields effective friction 1.5 instead of averaging. This prevents
+    /// a low-friction collider from dragging down ground grip.
+    /// Default: true. Set to `None` or `false` to use Average
+    /// (Rapier default).
+    #[serde(default = "default_friction_combine_max")]
+    pub friction_combine_max: Option<bool>,
 }
 
 fn default_gravity() -> f64 { 9.81 }
@@ -173,6 +229,11 @@ fn default_min_joint_motion() -> Option<f64> { Some(0.2) }
 fn default_max_joint_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_settle_duration() -> Option<f64> { Some(1.0) }
 fn default_num_signal_channels() -> usize { 0 }
+fn default_solver_iterations() -> Option<usize> { Some(8) }
+fn default_pgs_iterations() -> Option<usize> { Some(2) }
+fn default_friction_coefficient() -> Option<f64> { Some(1.5) }
+fn default_use_coulomb_friction() -> Option<bool> { Some(true) }
+fn default_friction_combine_max() -> Option<bool> { Some(true) }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
@@ -197,7 +258,31 @@ impl Default for EvolutionParams {
             num_signal_channels: 0,
             growth_interval: None,
             max_joint_angular_velocity: Some(20.0),
+            solver_iterations: Some(8),
+            pgs_iterations: Some(2),
+            friction_coefficient: Some(1.5),
+            use_coulomb_friction: Some(true),
+            friction_combine_max: Some(true),
         }
+    }
+}
+
+/// Apply physics solver config from EvolutionParams to a World.
+fn apply_physics_config(world: &mut crate::world::World, params: &EvolutionParams) {
+    if let Some(si) = params.solver_iterations {
+        world.solver_iterations = si;
+    }
+    if let Some(pgs) = params.pgs_iterations {
+        world.pgs_iterations = pgs;
+    }
+    if let Some(fc) = params.friction_coefficient {
+        world.friction_coefficient = fc;
+    }
+    if let Some(ucf) = params.use_coulomb_friction {
+        world.use_coulomb_friction = ucf;
+    }
+    if let Some(fcm) = params.friction_combine_max {
+        world.friction_combine_max = fcm;
     }
 }
 
@@ -213,6 +298,9 @@ pub fn evaluate_fitness(genome: &GenomeGraph, params: &EvolutionParams) -> Fitne
         }
         _ => Creature::from_genome_with_signals(genome.clone(), params.num_signal_channels),
     };
+
+    // Apply physics solver settings.
+    apply_physics_config(&mut creature.world, params);
 
     // Apply environment settings.
     match params.environment {
@@ -597,6 +685,7 @@ fn evaluate_following(genome: &GenomeGraph, params: &EvolutionParams) -> Fitness
 
     for trial in 0..num_trials {
         let mut creature = Creature::from_genome(genome.clone());
+        apply_physics_config(&mut creature.world, params);
         match params.environment {
             Environment::Water => {
                 creature.world.water_enabled = true;
@@ -1146,6 +1235,11 @@ mod tests {
             num_signal_channels: 0,
             growth_interval: None,
             max_joint_angular_velocity: None, // disable by default in existing tests
+            solver_iterations: None,
+            pgs_iterations: None,
+            friction_coefficient: None,
+            use_coulomb_friction: None,
+            friction_combine_max: None,
         }
     }
 
@@ -1381,6 +1475,11 @@ mod tests {
             num_signal_channels: 4,
             growth_interval: Some(60),
             max_joint_angular_velocity: Some(30.0),
+            solver_iterations: None,
+            pgs_iterations: None,
+            friction_coefficient: None,
+            use_coulomb_friction: None,
+            friction_combine_max: None,
         };
 
         for seed in 0..30u64 {

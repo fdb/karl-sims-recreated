@@ -5,9 +5,11 @@ import {
   getBestCreatures,
   getEvolution,
   getPhenotypeInfo,
+  physicsConfigJson,
   type GenotypeInfo,
   type CreatureInfo,
   type PhenotypeInfo,
+  type EvolutionConfig,
 } from "../api";
 import { Link } from "@tanstack/react-router";
 import MorphologyGraph from "../components/MorphologyGraph";
@@ -43,6 +45,7 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
   const [genomeBytes, setGenomeBytes] = useState<Uint8Array | null>(null);
   const [environment, setEnvironment] = useState<"Water" | "Land">("Water");
   const [goal, setGoal] = useState<"SwimmingSpeed" | "LightFollowing">("SwimmingSpeed");
+  const [evoConfig, setEvoConfig] = useState<EvolutionConfig | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Check for ?export=video URL param (used by Playwright/CLI capture)
@@ -65,6 +68,7 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
         if (c) setCreature(c);
         if (evo.config?.environment) setEnvironment(evo.config.environment);
         if (evo.config?.goal) setGoal(evo.config.goal);
+        if (evo.config) setEvoConfig(evo.config);
         setInfo(genoInfo);
         setPhenotype(phenoInfo);
         setGenomeBytes(new Uint8Array(bytes));
@@ -137,6 +141,7 @@ export default function CreatureDetail({ evoId, creatureId, islandId }: Props) {
                 genomeBytes={genomeBytes}
                 environment={environment}
                 goal={goal}
+                physicsJson={physicsConfigJson(evoConfig)}
                 exportVideo={autoExport}
               />
             )}
