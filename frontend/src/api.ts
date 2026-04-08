@@ -14,6 +14,9 @@ export interface EvolutionConfig {
   friction_coefficient?: number;
   use_coulomb_friction?: boolean;
   friction_combine_max?: boolean;
+  island_strategy?: "Isolated" | "RingMigration" | "HFC";
+  exchange_interval?: number;
+  diversity_pressure?: number;
 }
 
 /** Extract physics solver config from EvolutionConfig for passing to WASM sim_init. */
@@ -79,6 +82,9 @@ export interface CreateEvolutionParams {
   friction_coefficient?: number;
   use_coulomb_friction?: boolean;
   friction_combine_max?: boolean;
+  island_strategy?: string;
+  exchange_interval?: number;
+  diversity_pressure?: number;
   name?: string;
 }
 

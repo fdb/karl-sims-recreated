@@ -45,6 +45,9 @@ struct CreateEvolutionRequest {
     friction_coefficient: Option<f64>,
     use_coulomb_friction: Option<bool>,
     friction_combine_max: Option<bool>,
+    island_strategy: Option<String>,
+    exchange_interval: Option<usize>,
+    diversity_pressure: Option<f64>,
     name: Option<String>,
 }
 
@@ -338,6 +341,13 @@ async fn create_evolution(
         friction_coefficient: req.friction_coefficient.map(|v| v.clamp(0.0, 10.0)).or(Some(1.5)),
         use_coulomb_friction: req.use_coulomb_friction.or(Some(true)),
         friction_combine_max: req.friction_combine_max.or(Some(true)),
+        island_strategy: match req.island_strategy.as_deref() {
+            Some("ring_migration") => karl_sims_core::fitness::IslandStrategy::RingMigration,
+            Some("hfc") => karl_sims_core::fitness::IslandStrategy::HFC,
+            _ => karl_sims_core::fitness::IslandStrategy::Isolated,
+        },
+        exchange_interval: req.exchange_interval.unwrap_or(10).clamp(1, 100),
+        diversity_pressure: req.diversity_pressure.unwrap_or(0.0).clamp(0.0, 1.0),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {

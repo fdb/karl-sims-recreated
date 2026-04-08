@@ -5,7 +5,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 use karl_sims_core::evolution::EvolutionConfig;
-use karl_sims_core::fitness::{EvolutionParams, FitnessConfig};
+use karl_sims_core::fitness::{EvolutionParams, FitnessConfig, IslandStrategy};
 use karl_sims_core::genotype::GenomeGraph;
 
 use tokio::sync::broadcast;
@@ -25,6 +25,65 @@ use crate::timing::timed_db;
 /// Distinguishes unevaluated offspring from creatures that legitimately
 /// scored 0.0 (e.g. early termination).
 const NEEDS_EVAL: f64 = f64::NEG_INFINITY;
+
+// ── HFC (Hierarchical Fair Competition) state ──────────────────────────
+
+struct HfcState {
+    /// Admission threshold per island (min fitness to enter). Island 0 = -inf.
+    admission: Vec<f64>,
+    /// Export threshold per island (fitness above which creature gets promoted).
+    /// Top island = +inf.
+    export: Vec<f64>,
+}
+
+impl HfcState {
+    fn new(num_islands: usize) -> Self {
+        Self {
+            admission: vec![f64::NEG_INFINITY; num_islands],
+            export: vec![f64::INFINITY; num_islands],
+        }
+    }
+
+    /// Recompute thresholds from global fitness distribution using percentiles.
+    /// Lower islands get wider fitness ranges (more exploration),
+    /// higher islands get narrower ranges (more exploitation).
+    fn recompute(&mut self, island_individuals: &[Vec<(GenomeGraph, f64, i64)>]) {
+        let n = self.admission.len();
+        if n <= 1 { return; }
+
+        let mut all_fit: Vec<f64> = island_individuals.iter()
+            .flatten()
+            .map(|(_, f, _)| *f)
+            .filter(|f| f.is_finite() && *f > 0.0)
+            .collect();
+        if all_fit.is_empty() { return; }
+        all_fit.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let len = all_fit.len();
+        for i in 0..n {
+            self.admission[i] = if i == 0 {
+                f64::NEG_INFINITY
+            } else {
+                let idx = (i * len / n).min(len - 1);
+                all_fit[idx]
+            };
+            self.export[i] = if i == n - 1 {
+                f64::INFINITY
+            } else {
+                let idx = ((i + 1) * len / n).min(len - 1);
+                all_fit[idx]
+            };
+        }
+    }
+
+    /// Find the highest island a creature with given fitness should be placed in.
+    fn target_island(&self, fitness: f64) -> usize {
+        (0..self.admission.len())
+            .rev()
+            .find(|&i| fitness >= self.admission[i])
+            .unwrap_or(0)
+    }
+}
 
 /// Run a full evolution loop.  Hot state lives in memory; SQLite is used
 /// only for archival writes (so the creature viewer can fetch genomes)
@@ -76,6 +135,7 @@ pub async fn run_evolution(
 
     let num_islands = params.num_islands.max(1);
     let per_island_pop = (params.population_size / num_islands).max(1);
+    let mut hfc_state = HfcState::new(num_islands);
 
     // ── Initial population or resume ────────────────────────────────────
     // `island_individuals` is the in-memory state we carry across generations.
@@ -253,8 +313,9 @@ pub async fn run_evolution(
         // ── Reproduce next generation ───────────────────────────────────
         let next_gen = cur_gen + 1;
 
-        // Migration: ring topology
-        let migration_active = num_islands > 1
+        // ── Strategy-specific migration / promotion ──────────────────
+        let migration_active = params.island_strategy == IslandStrategy::RingMigration
+            && num_islands > 1
             && params.migration_interval > 0
             && next_gen > 0
             && next_gen % params.migration_interval == 0;
@@ -389,9 +450,66 @@ pub async fn run_evolution(
         // ── Write fitness back to DB (for creature viewer) ──────────────
         archive_fitness(&db, &next_island_individuals);
 
-        // ── Sort and update in-memory state ─────────────────────────────
-        for island in &mut next_island_individuals {
-            island.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // ── HFC promotion: move creatures between fitness tiers ─────────
+        if params.island_strategy == IslandStrategy::HFC
+            && num_islands > 1
+            && params.exchange_interval > 0
+            && next_gen > 0
+            && next_gen % params.exchange_interval == 0
+        {
+            // Recompute thresholds from current fitness distribution
+            hfc_state.recompute(&next_island_individuals);
+
+            // Collect creatures that exceed their island's export threshold
+            let mut promotions: Vec<(GenomeGraph, f64, i64)> = Vec::new();
+            for island_id in 0..num_islands {
+                let export_thresh = hfc_state.export[island_id];
+                let mut remaining = Vec::new();
+                for creature in next_island_individuals[island_id].drain(..) {
+                    if creature.1.is_finite() && creature.1 > export_thresh {
+                        promotions.push(creature);
+                    } else {
+                        remaining.push(creature);
+                    }
+                }
+                next_island_individuals[island_id] = remaining;
+            }
+
+            if !promotions.is_empty() {
+                log::info!(
+                    "Evolution {evo_id} Gen {next_gen}: HFC promoting {} creatures",
+                    promotions.len()
+                );
+            }
+
+            // Place promoted creatures into appropriate higher islands
+            for creature in promotions {
+                let target = hfc_state.target_island(creature.1);
+                next_island_individuals[target].push(creature);
+            }
+
+            // Fill island 0 (base) vacancies with random genomes
+            timed_db("coord.hfc_inject", &db, |conn| {
+                while next_island_individuals[0].len() < per_island_pop {
+                    let genome = GenomeGraph::random(&mut rng);
+                    let bytes = bincode::serialize(&genome).unwrap();
+                    let gid = insert_genotype(conn, evo_id, next_gen as i64, &bytes, None, 0);
+                    next_island_individuals[0].push((genome, NEEDS_EVAL, gid));
+                }
+            });
+
+            // Evaluate newly injected random creatures
+            evaluate_generation(&engine, &config_json_for_workers, &mut next_island_individuals);
+            archive_fitness(&db, &next_island_individuals);
+        }
+
+        // ── Morphological niching: reorder by diversity-adjusted fitness ─
+        if params.diversity_pressure > 0.0 {
+            apply_morphological_niching(&mut next_island_individuals, params.diversity_pressure);
+        } else {
+            for island in &mut next_island_individuals {
+                island.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            }
         }
         island_individuals = next_island_individuals;
 
@@ -636,6 +754,114 @@ fn pick_weighted<'a, R: Rng>(
     rng: &mut R,
 ) -> &'a GenomeGraph {
     parents[tournament_pick(fitnesses, rng)]
+}
+
+// ── Morphological niching ──────────────────────────────────────────────
+
+/// Morphological features for distance computation.
+struct MorphFeatures {
+    num_bodies: f64,
+    total_volume: f64,
+    joint_type_dist: [f64; 7],
+    aspect_ratios: Vec<f64>,
+}
+
+fn extract_morph_features(genome: &GenomeGraph) -> MorphFeatures {
+    use karl_sims_core::joint::JointType;
+    let pheno = karl_sims_core::phenotype::develop(genome);
+    let num_bodies = pheno.world.bodies.len() as f64;
+    let total_volume: f64 = pheno.world.bodies.iter()
+        .map(|b| 8.0 * b.half_extents.x * b.half_extents.y * b.half_extents.z)
+        .sum();
+
+    let mut joint_dist = [0.0f64; 7];
+    for j in &pheno.world.joints {
+        let idx = match j.joint_type {
+            JointType::Rigid => 0,
+            JointType::Revolute => 1,
+            JointType::Twist => 2,
+            JointType::Universal => 3,
+            JointType::BendTwist => 4,
+            JointType::TwistBend => 5,
+            JointType::Spherical => 6,
+        };
+        joint_dist[idx] += 1.0;
+    }
+    let total_joints = pheno.world.joints.len().max(1) as f64;
+    for d in &mut joint_dist { *d /= total_joints; }
+
+    let mut aspect_ratios: Vec<f64> = pheno.world.bodies.iter()
+        .map(|b| {
+            let dims = [b.half_extents.x, b.half_extents.y, b.half_extents.z];
+            let max = dims.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            let min = dims.iter().copied().fold(f64::INFINITY, f64::min);
+            if min > 0.0 { max / min } else { 1.0 }
+        })
+        .collect();
+    aspect_ratios.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    MorphFeatures { num_bodies, total_volume, joint_type_dist: joint_dist, aspect_ratios }
+}
+
+fn morph_distance(a: &MorphFeatures, b: &MorphFeatures) -> f64 {
+    let body_diff = (a.num_bodies - b.num_bodies).abs();
+    let vol_diff = (a.total_volume - b.total_volume).abs();
+    let joint_diff: f64 = a.joint_type_dist.iter().zip(&b.joint_type_dist)
+        .map(|(x, y)| (x - y).abs())
+        .sum();
+    let max_len = a.aspect_ratios.len().max(b.aspect_ratios.len());
+    let mut aspect_diff = 0.0;
+    for i in 0..max_len {
+        let av = a.aspect_ratios.get(i).copied().unwrap_or(1.0);
+        let bv = b.aspect_ratios.get(i).copied().unwrap_or(1.0);
+        aspect_diff += (av - bv).abs();
+    }
+    body_diff * 1.0 + vol_diff * 0.5 + joint_diff * 2.0 + aspect_diff * 0.5
+}
+
+/// Reorder each island's population by diversity-adjusted fitness.
+/// Raw fitness values in the tuples are preserved; only the ordering changes.
+fn apply_morphological_niching(
+    island_individuals: &mut Vec<Vec<(GenomeGraph, f64, i64)>>,
+    pressure: f64,
+) {
+    const SIGMA_SHARE: f64 = 3.0;
+
+    for island in island_individuals.iter_mut() {
+        if island.len() < 2 { continue; }
+
+        let features: Vec<MorphFeatures> = island.iter()
+            .map(|(g, _, _)| extract_morph_features(g))
+            .collect();
+
+        // Compute adjusted fitness for sorting (sharing)
+        let mut sort_keys: Vec<(usize, f64)> = Vec::with_capacity(island.len());
+        for i in 0..island.len() {
+            let raw = island[i].1;
+            if !raw.is_finite() || raw <= 0.0 {
+                sort_keys.push((i, raw));
+                continue;
+            }
+            let mut niche_count = 0.0f64;
+            for j in 0..island.len() {
+                if !island[j].1.is_finite() || island[j].1 <= 0.0 { continue; }
+                let d = morph_distance(&features[i], &features[j]);
+                if d < SIGMA_SHARE {
+                    niche_count += 1.0 - d / SIGMA_SHARE;
+                }
+            }
+            niche_count = niche_count.max(1.0);
+            let sharing = 1.0 - pressure + pressure / niche_count;
+            sort_keys.push((i, raw * sharing));
+        }
+        sort_keys.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Reorder island by adjusted fitness ranking, preserving raw fitness
+        let reordered: Vec<(GenomeGraph, f64, i64)> = sort_keys.iter()
+            .map(|(idx, _)| island[*idx].clone())
+            .collect();
+        *island = reordered;
+    }
 }
 
 #[cfg(test)]

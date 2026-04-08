@@ -26,8 +26,9 @@ export async function exportToMp4({
 }: ExportOptions): Promise<Blob> {
   // Use CSS pixel dimensions (not the device-pixel-ratio-scaled canvas.width)
   // to keep the encoded resolution reasonable and AVC-compatible.
-  const width = canvas.clientWidth || canvas.width;
-  const height = canvas.clientHeight || canvas.height;
+  // H.264 requires even dimensions — round down to nearest even number.
+  const width = ((canvas.clientWidth || canvas.width) & ~1);
+  const height = ((canvas.clientHeight || canvas.height) & ~1);
 
   // AVC level selection based on coded area (width rounded up to 16 * height rounded up to 16)
   const codedArea = Math.ceil(width / 16) * 16 * Math.ceil(height / 16) * 16;

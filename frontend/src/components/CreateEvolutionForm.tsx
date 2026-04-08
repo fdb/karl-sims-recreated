@@ -16,7 +16,10 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [gravity, setGravity] = useState(9.81);
   const [viscosity, setViscosity] = useState(2.0);
   const [numIslands, setNumIslands] = useState(5);
-  const [migrationInterval, setMigrationInterval] = useState(20);
+  const [migrationInterval, setMigrationInterval] = useState(0);
+  const [islandStrategy, setIslandStrategy] = useState("isolated");
+  const [exchangeInterval, setExchangeInterval] = useState(10);
+  const [diversityPressure, setDiversityPressure] = useState(0.0);
   const [minJointMotion, setMinJointMotion] = useState(0.2);
   const [maxJointAngularVelocity, setMaxJointAngularVelocity] = useState(20);
   const [solverIterations, setSolverIterations] = useState(8);
@@ -49,6 +52,10 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       friction_coefficient: frictionCoefficient,
       use_coulomb_friction: useCoulombFriction,
       friction_combine_max: frictionCombineMax,
+      island_strategy: islandStrategy,
+      exchange_interval: islandStrategy === "hfc" ? exchangeInterval : undefined,
+      migration_interval: islandStrategy === "ring_migration" ? migrationInterval : 0,
+      diversity_pressure: diversityPressure > 0 ? diversityPressure : undefined,
       name: name.trim() || undefined,
     });
     setCreating(false);
@@ -229,20 +236,78 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
           </p>
         </div>
 
-        {/* Migration interval */}
+        {/* Island strategy */}
         <div>
-          <label className={labelClass}>Migration Interval (gens)</label>
-          <input
-            type="number"
-            value={migrationInterval}
-            onChange={(e) => setMigrationInterval(Number(e.target.value))}
-            min={0}
-            max={1000}
-            disabled={numIslands <= 1}
+          <label className={labelClass}>Island Strategy</label>
+          <select
+            value={islandStrategy}
+            onChange={(e) => setIslandStrategy(e.target.value)}
             className={inputClass}
+            disabled={numIslands <= 1}
+          >
+            <option value="isolated">Isolated (no migration)</option>
+            <option value="ring_migration">Ring Migration</option>
+            <option value="hfc">HFC (Hierarchical Fair Competition)</option>
+          </select>
+          <p className="text-xs text-text-muted mt-1">
+            {islandStrategy === "isolated"
+              ? "Each island evolves independently — different species per island."
+              : islandStrategy === "ring_migration"
+              ? "Best creature migrates along a ring every N generations."
+              : "Islands become fitness tiers. Novel low-fitness creatures get protected from established winners."}
+          </p>
+        </div>
+
+        {/* Migration interval (ring only) */}
+        {islandStrategy === "ring_migration" && (
+          <div>
+            <label className={labelClass}>Migration Interval (gens)</label>
+            <input
+              type="number"
+              value={migrationInterval}
+              onChange={(e) => setMigrationInterval(Number(e.target.value))}
+              min={1}
+              max={1000}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Best of each island moves to next along a ring.
+            </p>
+          </div>
+        )}
+
+        {/* Exchange interval (HFC only) */}
+        {islandStrategy === "hfc" && (
+          <div>
+            <label className={labelClass}>Exchange Interval (gens)</label>
+            <input
+              type="number"
+              value={exchangeInterval}
+              onChange={(e) => setExchangeInterval(Number(e.target.value))}
+              min={1}
+              max={100}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              How often creatures are promoted between fitness tiers.
+            </p>
+          </div>
+        )}
+
+        {/* Diversity pressure */}
+        <div>
+          <label className={labelClass}>Diversity Pressure: {diversityPressure.toFixed(2)}</label>
+          <input
+            type="range"
+            value={diversityPressure}
+            onChange={(e) => setDiversityPressure(Number(e.target.value))}
+            min={0}
+            max={1}
+            step={0.05}
+            className="w-full accent-accent"
           />
           <p className="text-xs text-text-muted mt-1">
-            Best of each island moves to next along a ring. 0 = isolation.
+            Morphological niching: penalizes creatures similar to others. 0 = off.
           </p>
         </div>
       </div>

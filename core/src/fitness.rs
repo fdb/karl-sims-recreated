@@ -22,6 +22,25 @@ pub enum Environment {
     Land,
 }
 
+/// Island population management strategy.
+///
+/// Sims 1994: single population.
+/// Our variant: multi-island with selectable strategy.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum IslandStrategy {
+    /// No migration between islands — each evolves independently.
+    Isolated,
+    /// Ring topology migration: best creature from island N-1 migrates to
+    /// island N every `migration_interval` generations.
+    RingMigration,
+    /// Hierarchical Fair Competition (Hu & Goodman 2002): islands become
+    /// fitness tiers. Creatures exceeding their tier's threshold get promoted
+    /// upward. Base island receives continuous random injection. Prevents
+    /// premature convergence by protecting low-fitness novel creatures from
+    /// competition with established winners.
+    HFC,
+}
+
 /// Complete evolution parameters — serialized to JSON in the DB.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvolutionParams {
@@ -218,13 +237,40 @@ pub struct EvolutionParams {
     /// (Rapier default).
     #[serde(default = "default_friction_combine_max")]
     pub friction_combine_max: Option<bool>,
+    /// Island population management strategy.
+    ///
+    /// Sims 1994: single population with no island structure.
+    /// Our variant: multi-island with selectable strategy. See [`IslandStrategy`].
+    /// Default: `Isolated` (each island evolves independently).
+    #[serde(default = "default_island_strategy")]
+    pub island_strategy: IslandStrategy,
+    /// Generation interval for HFC fitness-tier exchanges. Every this many
+    /// generations, creatures exceeding their island's fitness threshold are
+    /// promoted to the appropriate higher island.
+    ///
+    /// Sims 1994: n/a.
+    /// Our variant: HFC exchange interval. Only used when `island_strategy == HFC`.
+    /// Default: 10 generations.
+    #[serde(default = "default_exchange_interval")]
+    pub exchange_interval: usize,
+    /// Morphological niching pressure (0.0 = off, 1.0 = full sharing).
+    /// After fitness evaluation, creatures with similar morphologies have their
+    /// effective fitness reduced, pushing evolution toward diverse body plans.
+    /// Uses fitness sharing with a morphological distance metric (body count,
+    /// volume, joint types, aspect ratios).
+    ///
+    /// Sims 1994: no explicit niching — diversity came from competitive fitness.
+    /// Our variant: fitness sharing based on morphological distance.
+    /// Default: 0.0 (disabled).
+    #[serde(default = "default_diversity_pressure")]
+    pub diversity_pressure: f64,
 }
 
 fn default_gravity() -> f64 { 9.81 }
 fn default_viscosity() -> f64 { 2.0 }
 fn default_max_body_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_num_islands() -> usize { 1 }
-fn default_migration_interval() -> usize { 20 }
+fn default_migration_interval() -> usize { 0 }
 fn default_min_joint_motion() -> Option<f64> { Some(0.2) }
 fn default_max_joint_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_settle_duration() -> Option<f64> { Some(1.0) }
@@ -234,6 +280,9 @@ fn default_pgs_iterations() -> Option<usize> { Some(2) }
 fn default_friction_coefficient() -> Option<f64> { Some(1.5) }
 fn default_use_coulomb_friction() -> Option<bool> { Some(true) }
 fn default_friction_combine_max() -> Option<bool> { Some(true) }
+fn default_island_strategy() -> IslandStrategy { IslandStrategy::Isolated }
+fn default_exchange_interval() -> usize { 10 }
+fn default_diversity_pressure() -> f64 { 0.0 }
 
 impl Default for EvolutionParams {
     fn default() -> Self {
@@ -252,7 +301,7 @@ impl Default for EvolutionParams {
             water_viscosity: 2.0,
             max_body_angular_velocity: Some(20.0),
             num_islands: 1,
-            migration_interval: 20,
+            migration_interval: 0,
             min_joint_motion: Some(0.2),
             settle_duration: Some(1.0),
             num_signal_channels: 0,
@@ -263,6 +312,9 @@ impl Default for EvolutionParams {
             friction_coefficient: Some(1.5),
             use_coulomb_friction: Some(true),
             friction_combine_max: Some(true),
+            island_strategy: IslandStrategy::Isolated,
+            exchange_interval: 10,
+            diversity_pressure: 0.0,
         }
     }
 }
@@ -1246,6 +1298,9 @@ mod tests {
             friction_coefficient: None,
             use_coulomb_friction: None,
             friction_combine_max: None,
+            island_strategy: IslandStrategy::Isolated,
+            exchange_interval: 10,
+            diversity_pressure: 0.0,
         }
     }
 
@@ -1492,6 +1547,9 @@ mod tests {
             friction_coefficient: None,
             use_coulomb_friction: None,
             friction_combine_max: None,
+            island_strategy: IslandStrategy::Isolated,
+            exchange_interval: 10,
+            diversity_pressure: 0.0,
         };
 
         for seed in 0..30u64 {
