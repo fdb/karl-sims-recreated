@@ -8,17 +8,20 @@ interface Props {
 
 export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
   const [goal, setGoal] = useState("swimming_speed");
-  const [environment, setEnvironment] = useState("water");
-  const [popSize, setPopSize] = useState(50);
-  const [maxGen, setMaxGen] = useState(100);
+  const [environment, setEnvironment] = useState("land");
+  const [popSize, setPopSize] = useState(300);
+  const [maxGen, setMaxGen] = useState(300);
   const [simDuration, setSimDuration] = useState(10);
   const [maxParts, setMaxParts] = useState(20);
   const [gravity, setGravity] = useState(9.81);
   const [viscosity, setViscosity] = useState(2.0);
-  const [numIslands, setNumIslands] = useState(1);
+  const [numIslands, setNumIslands] = useState(5);
   const [migrationInterval, setMigrationInterval] = useState(20);
+  const [minJointMotion, setMinJointMotion] = useState(0.2);
+  const [maxJointAngularVelocity, setMaxJointAngularVelocity] = useState(20);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleSubmit = async () => {
     setCreating(true);
@@ -33,6 +36,8 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
       water_viscosity: environment === "water" ? viscosity : undefined,
       num_islands: numIslands,
       migration_interval: migrationInterval,
+      min_joint_motion: minJointMotion,
+      max_joint_angular_velocity: maxJointAngularVelocity,
       name: name.trim() || undefined,
     });
     setCreating(false);
@@ -55,7 +60,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Water swimmers v2"
+            placeholder="e.g. Land walkers v3"
             maxLength={100}
             className={inputClass}
           />
@@ -75,7 +80,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
           <p className="text-xs text-text-muted mt-1">
             {environment === "water"
               ? "Zero gravity, per-face viscous water drag."
-              : "Gravity at 9.81 m/s², ground plane with collisions."}
+              : "Gravity at 9.81 m/s\u00B2, ground plane with collisions."}
           </p>
         </div>
 
@@ -112,6 +117,9 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             max={1000}
             className={inputClass}
           />
+          <p className="text-xs text-text-muted mt-1">
+            Sims 1994 used 300. Larger = more diversity.
+          </p>
         </div>
 
         {/* Max Generations */}
@@ -157,7 +165,7 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
         {/* Gravity (land only) */}
         {environment === "land" && (
           <div>
-            <label className={labelClass}>Gravity (m/s²)</label>
+            <label className={labelClass}>Gravity (m/s\u00B2)</label>
             <input
               type="number"
               value={gravity}
@@ -204,9 +212,9 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             className={inputClass}
           />
           <p className="text-xs text-text-muted mt-1">
-            Parallel sub-populations for species diversity. 1 = single pool
-            (paper). With {numIslands} islands, each gets ~
-            {Math.max(1, Math.floor(popSize / numIslands))} creatures.
+            Parallel sub-populations for species diversity. With {numIslands}{" "}
+            islands, each gets ~{Math.max(1, Math.floor(popSize / numIslands))}{" "}
+            creatures.
           </p>
         </div>
 
@@ -223,11 +231,60 @@ export default function CreateEvolutionForm({ onCreated, onCancel }: Props) {
             className={inputClass}
           />
           <p className="text-xs text-text-muted mt-1">
-            Best of each island moves to next island along a ring. 0 = full
-            isolation.
+            Best of each island moves to next along a ring. 0 = isolation.
           </p>
         </div>
       </div>
+
+      {/* Advanced settings toggle */}
+      <button
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        className="mt-4 text-xs text-text-muted hover:text-text-secondary transition-colors"
+      >
+        {showAdvanced ? "\u25BC" : "\u25B6"} Anti-exploit guards
+      </button>
+
+      {showAdvanced && (
+        <div className="grid grid-cols-2 gap-x-8 gap-y-4 mt-3 pt-3 border-t border-border">
+          {/* Min Joint Motion */}
+          <div>
+            <label className={labelClass}>Min Joint Motion (rad stddev)</label>
+            <input
+              type="number"
+              value={minJointMotion}
+              onChange={(e) => setMinJointMotion(Number(e.target.value))}
+              min={0}
+              max={2}
+              step={0.05}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Joints must oscillate above this threshold in every 2s window.
+              Lower = more permissive. 0 = disabled (paper-faithful).
+            </p>
+          </div>
+
+          {/* Max Joint Angular Velocity */}
+          <div>
+            <label className={labelClass}>Max Joint Angular Velocity (rad/s)</label>
+            <input
+              type="number"
+              value={maxJointAngularVelocity}
+              onChange={(e) =>
+                setMaxJointAngularVelocity(Number(e.target.value))
+              }
+              min={0}
+              max={100}
+              step={1}
+              className={inputClass}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Rejects creatures with joints faster than this. Lower = stricter
+              (blocks sliding exploits). Too low kills multi-body diversity.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-3 mt-6">
         <button

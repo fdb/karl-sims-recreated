@@ -37,6 +37,7 @@ struct CreateEvolutionRequest {
     num_islands: Option<usize>,
     migration_interval: Option<usize>,
     min_joint_motion: Option<f64>,
+    max_joint_angular_velocity: Option<f64>,
     num_signal_channels: Option<usize>,
     growth_interval: Option<usize>,
     name: Option<String>,
@@ -312,7 +313,7 @@ async fn create_evolution(
     };
     let params = EvolutionParams {
         population_size: req.population_size.unwrap_or(300).clamp(5, 1000),
-        max_generations: req.generations.unwrap_or(100).clamp(1, 10000),
+        max_generations: req.generations.unwrap_or(300).clamp(1, 10000),
         goal,
         environment: env,
         sim_duration: req.sim_duration.unwrap_or(10.0).clamp(1.0, 60.0),
@@ -320,13 +321,13 @@ async fn create_evolution(
         gravity: req.gravity.unwrap_or(9.81).clamp(0.0, 30.0),
         water_viscosity: req.water_viscosity.unwrap_or(2.0).clamp(0.1, 10.0),
         max_body_angular_velocity: Some(20.0),
-        num_islands: req.num_islands.unwrap_or(1).clamp(1, 12),
+        num_islands: req.num_islands.unwrap_or(5).clamp(1, 12),
         migration_interval: req.migration_interval.unwrap_or(20).clamp(0, 1000),
-        min_joint_motion: req.min_joint_motion.or(Some(0.1)),
+        min_joint_motion: req.min_joint_motion.or(Some(0.2)),
         settle_duration: Some(1.0),
         num_signal_channels: req.num_signal_channels.unwrap_or(0),
         growth_interval: req.growth_interval,
-        max_joint_angular_velocity: Some(30.0),
+        max_joint_angular_velocity: req.max_joint_angular_velocity.or(Some(20.0)),
     };
     let config_json = serde_json::to_string(&params).unwrap();
     let evo_id = {

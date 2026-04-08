@@ -48,6 +48,8 @@ export interface CreateEvolutionParams {
   water_viscosity?: number;
   num_islands?: number;
   migration_interval?: number;
+  min_joint_motion?: number;
+  max_joint_angular_velocity?: number;
   name?: string;
 }
 

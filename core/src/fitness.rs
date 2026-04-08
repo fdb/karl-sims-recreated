@@ -169,8 +169,8 @@ fn default_viscosity() -> f64 { 2.0 }
 fn default_max_body_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_num_islands() -> usize { 1 }
 fn default_migration_interval() -> usize { 20 }
-fn default_min_joint_motion() -> Option<f64> { Some(0.1) }
-fn default_max_joint_angular_velocity() -> Option<f64> { Some(30.0) }
+fn default_min_joint_motion() -> Option<f64> { Some(0.2) }
+fn default_max_joint_angular_velocity() -> Option<f64> { Some(20.0) }
 fn default_settle_duration() -> Option<f64> { Some(1.0) }
 fn default_num_signal_channels() -> usize { 0 }
 
@@ -192,11 +192,11 @@ impl Default for EvolutionParams {
             max_body_angular_velocity: Some(20.0),
             num_islands: 1,
             migration_interval: 20,
-            min_joint_motion: Some(0.1),
+            min_joint_motion: Some(0.2),
             settle_duration: Some(1.0),
             num_signal_channels: 0,
             growth_interval: None,
-            max_joint_angular_velocity: Some(30.0),
+            max_joint_angular_velocity: Some(20.0),
         }
     }
 }
